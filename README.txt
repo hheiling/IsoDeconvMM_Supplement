@@ -24,7 +24,7 @@ Subfolder 'Blueprint_Materials': Contains several materials needed to run the an
 
 Subfolder '02 IsoDeconvMM code': Contains the code that split the pure reference samples into appropriate subfolders (pure reference vs mixture creation), created the mixture files, ran isoDetector, and ran the Blueprint in silico analyses.
 
-Subfolder '03 CIBERSORTx code': Contains the code that created the input materials for the CIBERSORTx procedure, as well as the output. This folder contains its own README for more instructions.
+Subfolder '03 CIBERSORTx code': Contains the code that created the input materials for the CIBERSORTx procedure. This folder contains its own README for more instructions.
 
 The .Rmd file "Blueprint_IsoDetect_Results.Rmd" analyzes the isoDetect results (isoDetect function of the isoform package) and chooses the best transcript clusters to use in the analyses.
 

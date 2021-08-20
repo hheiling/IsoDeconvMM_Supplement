@@ -1,0 +1,347 @@
+---
+title: "Simulation Process and Needed Materials"
+author: "Hillary Heiling"
+date: "January 23, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview of Document
+
+This document describes all of the necessary steps needed to simulate counts data for an IsoDeconvMM simulation, and states what information/materials would be needed for each step.
+
+# Effective Length Design Matrix Calculation
+
+Ultimately, the goal is to simulate exon set counts for each gene (or transcript cluster). We will simulate these counts in two ways. First, we will simulate negative binomial mean (and theta) parameters for exon sets for each gene cluster. Based on the assumed model given in "IsoDOT Detects Differential RNA-Isoform Expression/Usage with Respect to a Categorical or Continuous Covariate with High Sensitivity and Specificity" by Sun et al. (2015), the vector of negative binomial means for the $E$ exon sets for gene $g$ is $\mu_g = X_g \beta_g$, where $X_g$ is the effective length design matrix and $\beta_g$ is a vector $(\beta_{g1},...\beta_{gI})^T$ where $\beta_{gu}$ is proportional to the transcript abundance of the $u^{th}$ isoform. Second, we will simulate probability vectors for the exon sets and find counts using a multinomial distribution. See section "Isoform to Exon Set Parameters - Dirichlet Multinomial Model" for further details. In both cases, the effective length design matrix $X_g$ is needed.
+
+In this section, the materials and procedures needed to create the effective length design matrix $X_g$ are described. In the next section "Simulate Counts for Exon Sets", the materials and procedures to simulate the necessary parameters for the simulations are described.
+
+## Find Exon Sets for all Isoforms
+
+Materials needed:
+
+* knownIsoforms .RData object relating the isoforms within each transcript cluster to the exons within the isoforms. When loaded, this object is a list where each component is a binary matrix that specifies a set of possible isoforms (e.g., isoforms from annotations) for a gene cluster. Specifically, it is a binary matrix of k rows and m columns, where k is the number of 
+non-overlapping exons and m is the number of isoforms. isoforms[i,j]=1 indicates that the i-th exon belongs to the j-th isoform. For example, the following matrix indicates the three isoforms for one gene ENSMUSG00000000003:
+
+```
+     ENSMUST00000000003 ENSMUST00000166366 ENSMUST00000114041
+[1,]                  1                  1                  1
+[2,]                  1                  1                  1
+[3,]                  1                  1                  1
+[4,]                  1                  1                  0
+[5,]                  1                  1                  1
+[6,]                  1                  1                  1
+[7,]                  1                  1                  1
+[8,]                  1                  0                  0
+
+```
+
+* Information that connects each isoform to its gene ID. The nTE .RData object relates the cluster ID to its gene ID (see example output below).
+
+Load mouse examples of objects of interest:
+
+```{r}
+# load the isoAll object:
+load("Mouse_Materials/Mus_musculus.NCBIM37.67.nonoverlap.exon.knownIsoforms.RData")
+
+# load the nTE object:
+load("Mouse_Materials/Mus_musculus.NCBIM37.67.nTE.RData")
+
+```
+
+Sample output of knownIsoforms and nTE:
+
+```{r}
+head(isoAll$chr1_1)
+
+head(nTE)
+```
+
+During the process of finding possible exon sets, there may be complications with mapping a particular gene ID to an exon within a cluster if there are multiple genes per cluster. Therefore, we will filter the clusters to only consider those clusters containing a single gene. 
+
+### What to do with information
+
+Ideally want to compose names of exons sets in the format given to count files output from the `countReads()` function of the `isoform` R package.
+
+```{r}
+# Load mouse example of output from countReads()
+counts_set1 = read.table(sprintf("Mouse_Materials/mm9_set1_counts.txt"), as.is = T)
+
+head(counts_set1,10)
+```
+
+Want to create strings like the strings present in the second column:
+
+clust_name|geneID|exon_number;
+
+General procedure:
+
+1. For each cluster, number all of the exons (from knownIsoforms matrix)
+
+2. For each isoform, find which exons are present in the isoform (from the knownIsoforms matrix)
+
+3. For each isoform, using the exon information from step 2, create string names for all exon sets with a single exon in the set: concatenate the cluster name, the gene ID (from nTE information) and exon number as described above. Store in a vector.
+
+4. Using the single exon set information from Step 3, concatenate appropriate strings to create the double exon set information. Store in a vector.
+
+5. Using the single exon set infomation from Step 3, concatenate appropriate strings to create the triple exon set information. Store in a vector.
+
+Note: See "Gene Samples and EffLen Design Matrix.Rmd" file for explicit details on how these strings were actually created. 
+
+Additional Note:
+
+Based on the exon set counts information from the mouse mm9 simulated example, the counts are distributed as follows:
+
+* Approximately 67.5% to 68.5% of total counts went to exon sets with a single exon in the set
+* Approximately 27.5% to 28% of total counts went to exon sets with two exons in the set
+* Approximately 3.5% of total counts went to exon sets with three exons in the set
+* Approximately 0.5% of total counts went to exon sets with four or more exons in the set
+
+Therefore, it was considered appropriate for our simulation just to consider single, double, and triple exon sets. 
+
+At this point, all possible single, double, and triple exon set information will be available. However, some of these exon sets will be more or less probable (or practically impossible) when considering the length of the exon sets and the distribution of fragment lengths. Therefore, need to create files containing fragment length distributions. 
+
+## Simulate Fragment Length Distribution Files
+
+1. Simulate `total_cts` lengths from a truncated normal distribution (mean 300, sd 50) truncated below at 150. 
+
+2. Round all outputs from Step 2 to the nearest integer and tablulate the number of fragments simulated at each length. 
+
+## Calculate X
+
+1. Using the above exon set information, the fragment length distribution, and the BED file containing exon length information, calculate the effective length design matrix for each gene of interest. Code to do this provided in "Gene Samples and EffLen Design Matrix.Rmd" and folder "geneModel_code/"
+
+2. Remove exon sets from consideration where the effective length across all isoforms is 0.
+
+3. For effective lengths that are calculated to be a fraction between 0 and 1, round up to 1.
+
+Now that we are armed with knowlegdge about the effective length design matrix, we can focus on calculating the necessary parameters.
+
+# Simulate Counts for Exon Sets
+
+This section outlines how the parameters and counts for all exon sets in each gene are to be calculated for each of the pure cell type reference samples.
+
+## Total Reads to Gene Parameters
+
+1. Specify total read counts for a sample. Based on reasoning in "Gene Samples and EffLen Design Matrix.Rmd", sample total read counts from a normal distribution with mean 7 million and sd 1 million for each sample. 
+
+2. Specify a Dirichlet distribution associated with all of the genes within a sample. For the purposes of this simulation, will fit a Dirichlet model based on some UCLA data and use this model as a 'realistic' Dirichlet model to use for simulation. See "Gene Samples and EffLen Design Matrix.Rmd" for further details about how genes were chosen for simulation and the fitting of the Dirichlet model.
+
+3. Sample a probability vector from the Dirichlet distribution in Step 2. 
+
+4. Plug the probability vector from Step 3 into a multinomial distribution, and sample `size` = total read counts from this distribution. This will result in gene counts for each sample. Do this `n` times for each cell type, where `n` = number of reference samples per cell type. This will add additional biological variability between the pure cell type samples. For each gene $g$, call the resulting gene count $T_g$.
+
+5. Assign a constant dispersion parameter value across all genes. Specify the dispersion parameter such that the negative binomial variance is not much different than the variance for a poisson distribution. $Var(G) = \mu_g + \frac{1}{\theta}\mu_g^2$ with $\theta$ some large number, such as 100 (a range of 90 to 120).
+
+As a result of this step, we should have the gene counts for each gene cluster and a constant dispersion parameter for all genes.
+
+## Gene Cluster to Isoform Parameters
+
+1. For each gene, specify a Dirichlet distriubtion associated with the isoforms for the cluster. See subsection "Possible Dirichlet Distributions to Consider" within section "Multiple Cell Types to Consider" for further details about this Dirichlet distribution choice.
+
+2. Sample a probability vector from the Dirichlet distribution in Step 1. Call this probability vector $\rho_g$ for gene $g$.
+
+As a result of this step, we should have the probability vectors for the distribution of each isoform within a gene cluster.
+
+## Isoform to Exon Set Parameters - Dirichlet Negative Binomial Model
+
+### Available Materials and Known Models
+
+From earlier, we have created the ExI effective length design matrix, $X_g = (x_{g1}, ..., x_{gI})$, for each gene cluster $g$. The columns of this design matrix correspond to the I isoforms for the gene cluster, and the rows correspond to the E exon sets for the gene cluster. We have also determined the gene cluster counts $T_g$ and the probability distribution for the isoforms $\rho_g$ within the gene cluster $g$. 
+
+For each gene, let $\mu_g$ be a vector of means corresponding to all exon sets, $\mu_g = (\mu_{g1}, ..., \mu_{gE})^T$. This vector of means is characterized by $\mu_g = X_g \beta_g$ where $\beta_g = (\beta_{g1}, ..., \beta_{gI})^T$ and each $\beta_{gu}$ is proportional to the transcript abundance of isoform $u$. 
+
+### Relationships:
+
+Additional variables:
+
+$\rho_g$ = given a read is from gene $g$, vector of I probabilities that the read belongs to isoform $i$. Sampled from the Dirichlet dist in "Gene Cluster to Isoform Parameter" section. Vector of length I = number of isoforms in gene $g$.
+
+$r_g$ = scaling factor
+
+$T_g$ = total fragment count for gene g (simulated in section "Total Reads to Gene Parameters")
+
+Relationships of interest:
+
+$\mu_g = X_g\beta_g = X_g \rho_g r_g$, so $\beta_g = \rho_g r_g$. Need to find $r_g$
+
+$T_g = \sum_e \mu_{ge} = r_g \sum_e (X_g \rho_g) \rightarrow r_g = \frac{T_g}{\sum_e (X_g \rho_g)}$
+
+### Details to Simulate Exon Set NegBin Means and Counts
+
+1. If we simulate isoform probability distribution parameters as described in the "Gene Cluster to Isoform Parameters" section, we can calculate the $\beta_g$ parameters by calculating $r_g = \frac{T_g}{\sum_e (X_g \rho_g)}$ and then calculating $\beta_g = \rho_g r_g$.
+
+2. Perform the matrix multiplication $X_g \beta_g$ to get the vector $\mu_g$. Each element of this vector will be the negative binomial mean parameter for each possible exon set. 
+
+3. Using the negative binomial mean parameters from Step 2 and the constant $\theta$ parameter determined earlier, simulate exon set counts. 
+
+## Isoform to Exon Set Parameters - Dirichlet Multinomial Model
+
+### Available Materials and Known Models
+
+From earlier, we have created the ExI effective length design matrix, $X_g = (x_{g1}, ..., x_{gI})$, for each gene cluster $g$. The columns of this design matrix correspond to the I isoforms for the gene cluster, and the rows correspond to the E exon sets for the gene cluster. We have also determined the gene cluster counts $T_g$ and the probability distribution for the isoforms $\rho_g$ within the gene cluster $g$. 
+
+For each gene, let $\mu_g$ be a vector of exon set counts corresponding to all exon sets, $\mu_g = (\mu_{g1}, ..., \mu_{gE})^T$. This vector of counts is characterized by a multinomial distribution, described in the "Relationships" section.  
+
+### Relationships:
+
+Variables:
+
+$\rho_g$ = given a read is from gene $g$, vector of I probabilities that the read belongs to isoform $i$. Sampled from the Dirichlet dist in "Gene Cluster to Isoform Parameter" section. Vector of length I = number of isoforms in gene $g$.
+
+$T_g$ = total fragment count for gene g (simulated in section "Total Reads to Gene Parameters")
+
+$T_{tot}$ = total read count in the sample
+
+$\tau_g$ = proportion of counts in sample that belong to gene $g$
+
+$Y_{g}$ = vector of $E$ exon set counts in gene $g$
+
+$Y_{g(A)}$ = sum of counts for all other genes in sample outside of gene $g$
+
+$\gamma_g$ = per-unit of effective length conditional probabilities that a read belongs to isoform $i$ given that it maps to gene $g$. Vector of length I.
+
+$\tilde \ell_g$ = vector of total effective lengths of I isoforms. $\tilde \ell_{gi} = \sum_{e=1}^E X_{gei}$ for $i^{th}$ isoform. 
+
+Relationships of interest:
+
+$\sum_{i=1}^I \tilde \ell_i * \gamma_{gi} = 1 = \sum_{i=1}^I \rho_i$
+
+$\gamma_g = \rho_g / \tilde \ell_g$
+
+$\tau_g = T_g / T_{tot}$
+
+$$\begin{bmatrix} Y_{g(A)} \\ Y_g  \end{bmatrix}
+| \tau_g, \gamma_g \sim \text{Multinomial} \left(T_{tot}, 
+\begin{bmatrix} 1 - \tau_g \\ \tau_g X \gamma_g \end{bmatrix} \right)
+$$
+
+For each gene, this can be re-written as:
+
+$$Y_g | \gamma_g \sim \text{Multinomial}(T_g, s_g^\star X \gamma_g)$$
+
+where $s_g^\star$ is the scaling factor that makes the sum of the vector $s_g^\star X \gamma_g$ equal 1.
+
+### Details to Simulate Exon Set Counts
+
+1. If we simulate isoform probability distribution parameters as described in the "Gene Cluster to Isoform Parameters" section, we can calculate the $\gamma_g$ parameters by first calculating $\tilde \ell$ ($\tilde \ell_{gi} = \sum_{e=1}^E X_{gei}$) and then calculating $\gamma_g = \rho_g / \tilde \ell_g$.
+
+2. Calculate the vector $X \gamma_g$ and the scaling parameter $s_g^\star$ such that the sum of the vector $s_g^\star X \gamma_g$ equals 1. The new probability vector for the $E$ exon sets in gene $g$ is then $s_g^\star X \gamma_g$.
+
+3. Calculate the counts $Y_g$ using the multinomial expression given above ($Y_g | \gamma_g \sim \text{Multinomial}(T_g, s_g^\star X \gamma_g)$)
+
+# Multiple Cell Types to Consider
+
+We want to simulate data from three different cell types. This section describes some details related to simulating differences across the different cell types.
+
+Differences between cell types to consider:
+
+* Differential isoform expression
+* Differential isoform usage
+
+Assume we have 1000 'genes of interest' which will be considered for selection to use in the `IsoDeconvMM` fit algorithm. Of the 1000 genes, specify 100 to have differential isoform expression across cell types and 100 to have differential isoform usage across cell types. Each of these sets of 100 genes should be non-overlapping.
+
+We will simulate differential isoform usage across all three cell types (same 100 genes specified for differential isoform usage across all three cell types). We will simulate differential expression only for one cell type (expression similar for cell types 1 and 3, but differential expression in cell type 2).
+
+In the simulation procedure, differential isoform expression will be simulated first, then differential isoform usage.
+
+## Differential isoform expression
+
+1. Create a log2 fold change vector of size N, where N = number of genes (1000). The vector will have about 900 entries equal to 0 and the other 100 not equal to 0. These non-zero values will be simulated from the range $(log2(1.5), log2(2.0))$ for up expression and $(-log2(2.0), -log2(1.5))$ for down expression.
+
+2. After the counts have been determined for each gene in the cell type (cell type 2) based on the UCLA dirichlet distribution as described in the section "Total Reads to Gene Cluster Parameters", multiply these count values by $2^{log2(fc) + \epsilon}$, where $log2(fc)$ is the value of the fold change and $\epsilon \sim N(0, 0.05)$ (for some added variability across samples).
+
+3. Balance total gene expression (see subsection "Balance Fold Changes")
+
+4. Proceed as typical for the rest of the process to get exon set counts as described above. 
+
+### Balance Fold Changes
+
+Goal: To have the total proportion of gene expression for the 100 genes assigned differential expression to have the same proportion of gene expression (relative to the total number of reads) in the new cell type 2 gene counts as they would have if no fold changes had been applied to the gene counts.
+
+A. In the initial gene counts assigned to cell type 2, calculate the gene expression proportion for the genes of interest by summing the gene counts created in the section "Total Reads to Gene Parameters" for the genes and dividing by the total number of reads. 
+
+B. Repeat Step A for cell type 2 after the fold changes have been applied.
+
+C. Take the ratio of the proportions (proportion A / proportion B) and multiply this ratio by all of the gene counts (of the 100 differentially expressed genes) after fold change. 
+
+## Differential isoform usage
+
+For the 100 genes designated to have a different isoform usage, perform the following:
+
+In Step 1 of the section "Gene Cluster to Isoform Parameters", specify a different Dirichlet distribution from which to sample. Otherwise, continue as normal. See details about possible Dirichlet distributions in subsection "Possible Dirichlet Distributions to Consider".
+
+### Possible Dirichlet Distributions to Consider
+
+**High Effect Size Option**
+
+We will consider 3 cell types in this simulation. The genes specified to have differential isoform expression will have different Dirichlet distributions for each cell type. All of the genes selected for diffferential isoform usage will have 3 or more isoforms, so we will consider the following classes of Dirichlet distributions:
+
+* 'uniform': All $\alpha$ parameters will be equal for each of the $I$ isoforms, resulting in probabilities close to $1/I$ for each isoform. Let this $\alpha$ value equal 50.
+
+* 'outlier1': The first isoform of the $I$ isoforms will have a Dirichlet $\alpha$ value relatively high, resulting in a relativley high probability and the remaining probability will be approx. evenly distributed among the remaining $I-1$ isoforms ($\alpha$ values associated with these $I-1$ probabilities all constant at a lower $\alpha$ value). The high $\alpha$ value will be 50, the low $\alpha$ value will be 5.
+
+* 'outlier2': The second isoform of the $I$ isoforms will have a Dirichlet $\alpha$ value relatively high, resulting in a relativley high probability and the remaining probability will be approx. evenly distributed among the remaining $I-1$ isoforms ($\alpha$ values associated with these $I-1$ probabilities all constant at a lower $\alpha$ value). The high $\alpha$ value will be 50, the low $\alpha$ value will be 5.
+
+* 'outlier3': The third isoform of the $I$ isoforms will have a Dirichlet $\alpha$ value relatively high, resulting in a relativley high probability and the remaining probability will be approx. evenly distributed among the remaining $I-1$ isoforms ($\alpha$ values associated with these $I-1$ probabilities all constant at a lower $\alpha$ value). The high $\alpha$ value will be 50, the low $\alpha$ value will be 5.
+
+All isoform Dirichlet distributions for all genes not selected for differential isoform usage will be arbitrarily assigned a 'uniform' Dirichlet distribution. For the genes selected for differential isoform usage, cell type 1 will have the outlier1 class, cell type 2 will have the outlier2 class, and cell type 3 will have the outlier3 class.
+
+**Realistic Effect Size Option**
+
+Genes not selected for differential isoform usage will still be assigned a 'uniform' Dirichlet distribution. However, the $\alpha$ values in the Dirichlet distributions of the genes with differential isoform usage will come from fitting transcript clusters with differential isoform usage in the Blueprint data (described in the paper). These values will be filtered such that fits resulting in `NA` $\alpha$ values or $\alpha$ values exceedingly high ($\alpha > 300) will be excluded. Full details can be found in the document "Blueprint Alpha Parameters.Rmd".
+
+If a gene in the simulation has $I$ isoforms, then a collection of $\alpha$ values from a gene with the same number of isoforms will be selected. This collection includes the $\alpha$ values for all three cell types. These Dirichlet $\alpha$ values, specific for each cell type, will be used in the simulation process to select the $\rho_g$ parameter. 
+
+# Simulate Mixture Sample Counts
+
+This section describes the steps to combine counts from pure cell type reference samples to get mixture samples.
+
+1. Specify a total read count for the mixture sample (same as pure cell type samples: total counts distributed normally with mean 7 million and sd 1 million).
+
+2. From a subset of the pure cell type reference samples, select one sample from each cell type. Extract the counts from this sample.
+
+3. For each mixture sample, specify a probability vector $(p_{CT1},p_{CT2},p_{CT3})$ where each element of the probability vector is associated with one of the pure cell types.
+
+4. Calculate the ratio of mixture total read counts divided by the total read counts for the three pure cell type samples selected to contribute counts to the mixture sample. 
+
+5. Multiply all counts (recall: all counts recorded by exon set) calculated for one of the pure cell type samples by the probability associated with that cell type and the associated total read count ratio. Do for all cell types. Round these new counts to the nearest integer.
+
+6. Add all of the counts from step 5 together by exon set to get the mixture counts.
+
+# Simulate Fragment Length Distribution Files for Simulation Fit
+
+For each mixture sample, there needs to be an associated fragment lengths distribution file associated with the sample in order to run the `IsoDeconvMM` fit algorithm. For the purposes of the simulation, we will simulate a single fragment length distribution file and use it for all mixture samples (we assume that the fragment length distribution is consistent across the mixtures samples).
+
+1. Select a total read count, `total_cts`. 
+
+2. Simulate `total_cts` lengths from a truncated normal distribution (mean 300, sd 50) truncated below at 150. 
+
+3. Round all outputs from Step 2 to the nearest integer and tablulate the number of fragments simulated at each length. 
+
+# UCLA Data Summary
+
+Some UCLA data was used as inspiration for 'realistic' gene count distributions. Details on how these UCLA data summaries were created are provided in file "Human_Materials/step2_check_RSEM_ucla.R".
+
+Load summary data
+
+```{r}
+eDat = readRDS("Human_Materials/ucla_eDat.rds")
+cDat = readRDS("Human_Materials/ucla_cDat.rds")
+```
+
+eDat exploration
+
+```{r}
+dim(eDat)
+head(rownames(eDat),20)
+colnames(eDat)
+eDat[1:5, 1:5]
+```
+
+See "Gene Samples and Effective Design Matrix.Rmd" for full details describing how this data set was used in the simulation procedure.
+
+The End

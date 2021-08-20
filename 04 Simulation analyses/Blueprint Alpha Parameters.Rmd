@@ -1,0 +1,141 @@
+---
+title: "Blueprint Alpha Parameters"
+author: "Hillary Heiling"
+date: "May 5, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(stringr)
+```
+
+Note: After checking the parameter results from multiple mixture fits, it looks like the pure sample cluster parameters are consistent across the different mixture fits. Therefore, only need to look at results from one mixture fit.
+
+## Blueprint Alpha Parameters - 11A Results
+
+```{r}
+files = list.files(path = "~/Longleaf/Blueprint/Simulation_Results/Fit11A/Results_Abbrev/",
+                   pattern = "Mix_001_", full.names = T)
+
+alpha_limit = 500
+
+alpha_lst = list()
+clust_names_all = character(0)
+for(i in 1:length(files)){
+  # load SimResults object
+  load(files[i])
+  params = SimResults[[1]]
+  clust_names_all = c(clust_names_all, names(params))
+  tmp = list()
+  for(j in 1:length(params)){
+    tmp[[j]] = params[[j]]$alpha.est
+  }
+  
+  alpha_lst = c(alpha_lst, tmp)
+}
+
+names(alpha_lst) = clust_names_all
+
+
+# Only keep clusters where alpha values are 'reasonable'
+keep = numeric(length(alpha_lst))
+alpha_keep = list()
+for(i in 1:length(alpha_lst)){
+  a_mat = alpha_lst[[i]]
+  
+  if(any(is.na(a_mat))){
+    keep[i] = 0
+    next
+  }
+  
+  issue = ifelse(a_mat > alpha_limit, 1, 0)
+  if(sum(issue) > 1){
+    keep[i] = 0
+  }else{
+    keep[i] = 1
+  }
+}
+
+# sum(keep)
+keep_idx = which(keep == 1)
+alpha_keep = alpha_lst[keep_idx]
+
+# alpha_blue = alpha_keep
+
+```
+
+Total number of clusters used in Bluepring simulation:
+
+```{r}
+length(alpha_lst)
+```
+
+Number of clusters kept after filtering:
+
+```{r}
+length(alpha_keep)
+```
+
+
+Range of number of isoforms in alpha_keep:
+
+```{r}
+I = numeric(length(alpha_keep))
+for(i in 1:length(alpha_keep)){
+  I[i] = nrow(alpha_keep[[i]])
+}
+
+table(I)
+```
+
+Number of clusters with number isoforms at least 3 and no more than 15:
+
+```{r}
+sum(I <= 15)
+```
+
+
+Organize alpha_keep by I (number of isoforms)
+
+```{r}
+alpha_collect = list()
+
+alpha_collect[[1]] = NULL
+alpha_collect[[2]] = NULL
+for(k in 3:15){
+  alpha_collect[[k]] = list()
+}
+
+for(k in 3:15){
+  lst = list()
+  counter = 1
+  for(i in 1:length(alpha_keep)){
+    iso = nrow(alpha_keep[[i]])
+    if(iso == k){
+      lst[[counter]] = alpha_keep[[i]]
+      counter = counter + 1
+    }else{
+      next
+    }
+  }
+  alpha_collect[[k]] = lst
+}
+
+
+length(alpha_collect)
+
+alpha_collect[[4]]
+```
+
+```{r}
+alpha_collect11A = alpha_collect
+save(alpha_collect11A, file = "Blueprint_Alpha_Collection_11A.RData")
+```
+
+
+
+The End

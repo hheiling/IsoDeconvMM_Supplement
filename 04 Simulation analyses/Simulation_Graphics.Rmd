@@ -1,0 +1,766 @@
+---
+title: "Simulation Graphics"
+author: "Hillary Heiling"
+date: "August 19, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F)
+```
+
+# Overview
+
+The simultaions presented here are the results of simulations designed in "Simulation 1 Documentation Dirichlet-NB.Rmd", "Simulation 2 Documentation Dirihclet-NB.Rmd", and "Simulation 3 Documentation Dirichlet-MM Model.Rmd".
+
+The purpose of the simulations are to examine the performance of the `IsoDeconvMM` method under different data modeling assumptions: Dirichlet-Multinomial vs Dirichlet-Negative Binomial exon set counts models, and moderate vs high isoform distribution effect sizes.
+
+Load libraries
+
+```{r}
+library(knitr)
+library(stringr)
+library(ggplot2)
+library(reshape2)
+library(ICSNP)
+```
+
+Load materials
+
+```{r, echo=T}
+# nTE_filtered
+load("Human_Materials/Homo_sapiens.GRCh37.66.nTE.filtered.RData")
+# genes_df
+load("Simulated_Output/genes_simulated_w_diffExp_diffUsg.RData")
+
+clustDiffUsg = nTE_filtered$clustID[which(nTE_filtered$geneId %in% genes_df$diffUsg)]
+clustNoDiff = nTE_filtered$clustID[which(nTE_filtered$geneId %in% genes_df$noDiff)]
+
+# p_combos
+load("Simulated_Output/ProbCombos_Mixtures50.RData")
+
+# Source graphics_code
+source("Sim_Graphics/graphics_code.R")
+```
+
+
+# Dirichlet-Multinomial with Blueprint Isoform Dirichlet Alpha Parameters
+
+Simulation 3 Fit 3
+
+* Dirichlet-Multinomial model using saved Dirichlet alpha parameters from the Blueprint simulations in simulation 11A. (See Bluepring Alpha Parameters.Rmd)
+
+* Genes with differential isoform usage only (no genes with differential expression)
+
+* Used the 10 generic initial points used in the Blueprint analysis
+
+Load materials
+
+```{r}
+
+clustDiffUsg = nTE_filtered$clustID[which(nTE_filtered$geneId %in% genes_df$diffUsg)]
+clustNoDiff = nTE_filtered$clustID[which(nTE_filtered$geneId %in% genes_df$noDiff)]
+
+# Number cell types
+J = 3
+
+CT = c("CT1","CT2","CT3")
+```
+
+## Scatter Plots
+
+```{r}
+files = NULL
+probs = NULL
+df_100 = NULL
+df_50 = NULL
+df_25 = NULL
+df_10 = NULL
+df_ClustNo = NULL
+```
+
+
+```{r}
+# Read in data for Simulation 3 Fit 3
+
+# Create 'probs' list
+## Each element of list = matrix of probability estimates for each of the discriminatory
+## clusters used in the fit analysis. 
+
+files = list.files(path = "C:/Users/hheiling/Documents/Longleaf/deconvolution/Simulation_Results/Sim3Fit3/Summary_Probs/", full.names = T)
+
+# Note: There are 5 results files for each mixture file (in order to reduce computation time)
+
+probs_DMM = list()
+mix_names = unique(str_sub(basename(files), start = 1, end = 7))
+
+for(i in 1:length(mix_names)){
+  files_i = files[which(str_detect(files, mix_names[i]))]
+  for(j in 1:length(files_i)){
+    # Load SimSummary
+    load(files_i[j])
+    if(j == 1){
+      p_mat = SimSummary[[1]]$p_mat
+    }else{
+      p_mat = rbind(p_mat, SimSummary[[1]]$p_mat)
+    }
+    
+  }
+  
+  probs_DMM[[i]] = p_mat 
+  
+}
+
+names(probs_DMM) = mix_names
+
+# length(probs)
+# dim(probs[[1]])
+
+rownames(p_combos) = mix_names
+
+# probs_DMM = probs
+```
+
+
+Comparison using different numbers of DU clusters
+
+Note: When setting the seed, this behaves differently when running regularly and running when knitting the document (random selection of clusters for subsets are different). 
+
+When saving figures, chose to keep the figures that were created when I ran the code within the Rmd document, not the figures created when Knitting the document.
+
+```{r}
+clust_names_100 = rownames(probs_DMM[[1]])
+set.seed(2714)
+clust_names_50 = sample(clust_names_100, 50, replace = F)
+clust_names_25 = sample(clust_names_100, 25, replace = F)
+clust_names_10 = sample(clust_names_100, 10, replace = F)
+
+# print(clust_names_10)
+```
+
+
+```{r}
+
+
+df_100 = p_dfA(pList = probs_DMM, mix_labels = mix_names, clust_names = clust_names_100,
+              p_combos = p_combos, out_remove = F)
+df_100$ClustNum = "100 Clusters"
+# head(df_100)
+# tail(df_100)
+
+df_50 = p_dfA(pList = probs_DMM, mix_labels = mix_names, clust_names = clust_names_50,
+              p_combos = p_combos, out_remove = F)
+df_50$ClustNum = "50 Clusters"
+# head(df_50)
+# tail(df_50)
+
+df_25 = p_dfA(pList = probs_DMM, mix_labels = mix_names, clust_names = clust_names_25,
+              p_combos = p_combos, out_remove = F)
+df_25$ClustNum = "25 Clusters"
+# head(df_25)
+# tail(df_25)
+
+df_10 = p_dfA(pList = probs_DMM, mix_labels = mix_names, clust_names = clust_names_10,
+              p_combos = p_combos, out_remove = F)
+df_10$ClustNum = "10 Clusters"
+# head(df_10)
+# tail(df_10)
+
+# df_ClustNo = rbind(df_100, df_50, df_25)
+df_ClustNo = rbind(df_100, df_50, df_25, df_10)
+```
+
+```{r}
+# Comparison of different numbers of clusters
+# ggplot(data = df_ClustNo) + geom_point(mapping = aes(x = True_p, y = p_est), shape = 1) + 
+#   facet_grid(ClustNum ~ CellType) + geom_abline(slope = 1, intercept = 0) +
+#   xlab("True Proportion") + ylab("Proportion Estimate") +
+#   coord_fixed(ratio = 1, xlim = c(0, 1), ylim = c(0,1)) +
+#   ggtitle("Multinomial") +
+#   theme_grey(base_size = 18) +
+#   theme(axis.text.x = element_text(angle = 270))
+# ggsave(filename = "Sim_Graphics/Scatter_DirMM.eps",
+#        width = 6, height = 7, units = "in")
+
+# df_ClustNo$ClustNum = factor(df_ClustNo$ClustNum, levels=c(100,50,25,10))
+df_ClustNo$ClustNum = factor(df_ClustNo$ClustNum, 
+                             levels = c("100 Clusters","50 Clusters","25 Clusters","10 Clusters"))
+
+(DirMM = ggplot(data = df_ClustNo) + geom_point(mapping = aes(x = True_p, y = p_est), shape = 1) + 
+  facet_grid(CellType ~ ClustNum) + geom_abline(slope = 1, intercept = 0) +
+  xlab("True Proportion") + ylab("Proportion Estimate") +
+  coord_fixed(ratio = 1, xlim = c(0, 1), ylim = c(0,1)) +
+  ggtitle("Multinomial") +
+  theme_grey(base_size = 18) +
+  theme(axis.text.x = element_text(angle = 270)))
+# ggsave(filename = "Sim_Graphics/Scatter_DirMM.eps", plot = DirMM,
+#        width = 7, height = 6, units = "in")
+```
+
+```{r}
+library(stringr)
+
+par(mfcol = c(3,4))
+for(i in 1:4){
+  if(i == 1){
+    df = df_100
+  }else if(i == 2){
+    df = df_50
+  }else if(i == 3){
+    df = df_25
+  }else if(i == 4){
+    df = df_10
+  }
+  
+  for(ct in 1:3){
+    df_sub = df[which(str_detect(df$CellType, as.character(ct))),]
+    plot(x = df_sub$True_p, y = df_sub$p_est, xlim = c(0,1), ylim = c(0,1))
+    abline(a = 0, b = 1)
+  }
+  
+}
+```
+
+
+```{r}
+
+# Correlations and SSE 
+
+x_sim3fit3 = corr_SSE(df_list = list(df_100, df_50, df_25, df_10),
+                        col_labels = c("100 Clusters","50 Clusters","25 Clusters","10 Clusters"), 
+                      CT = CT)
+
+kable(x_sim3fit3$corr, digits = 3, caption = "Cell Type Correlation Comparison")
+kable(x_sim3fit3$SSE, digits = 3, caption = "Cell Type SSE Comparison")
+
+df_corr_s3f3 = bar_df(table = x_sim3fit3$corr, 
+                         col_labels = c("100 Clusters","50 Clusters", "25 Clusters","10 Clusters"), 
+                        var_name = "Clusters", value_name = "Correlation")
+df_corr_s3f3$Sim = "Multinomial"
+
+df_SSE_s3f3 = bar_df(table = x_sim3fit3$SSE, 
+                        col_labels = c("100 Clusters","50 Clusters", "25 Clusters","10 Clusters"), 
+                       var_name = "Clusters", value_name = "SSE")
+df_SSE_s3f3$Sim = "Multinomial"
+
+```
+
+
+
+# Dirichlet-Negative Binomial with Blueprint Isoform Dirichlet Alpha Parameters, Small Overdispersion
+
+Simulation 1 Fit 2
+
+* Dirichlet-Negative Binomial model using saved Dirichlet alpha parameters from the Blueprint simulations in simulation 11A. (See Bluepring Alpha Parameters.Rmd)
+
+* Negative Binomial variance: $Var(X) = \mu + \frac{1}{\theta} \mu^2$ where $\theta$ between 90 and 120
+
+* Genes with differential isoform usage only (no genes with differential expression)
+
+* Used the 10 generic initial points used in the Blueprint analysis
+
+
+
+## Scatter Plots
+
+```{r}
+files = NULL
+probs = NULL
+df_100 = NULL
+df_50 = NULL
+df_25 = NULL
+df_10 = NULL
+df_ClustNo = NULL
+```
+
+```{r}
+# Read in data for Simulation 1 Fit 2
+
+# Create 'probs' list
+## Each element of list = matrix of probability estimates for each of the discriminatory
+## clusters used in the fit analysis. 
+
+files = list.files(path = "C:/Users/hheiling/Documents/Longleaf/deconvolution/Simulation_Results/Sim1Fit2/Summary_Probs/", full.names = T)
+
+# Note: There are 5 results files for each mixture file (in order to reduce computation time)
+
+probs_DNB12 = list()
+mix_names = unique(str_sub(basename(files), start = 1, end = 7))
+
+for(i in 1:length(mix_names)){
+  files_i = files[which(str_detect(files, mix_names[i]))]
+  if(length(files_i) != 5) print(basename(files_i))
+  for(j in 1:length(files_i)){
+    # Load SimSummary
+    load(files_i[j])
+    if(j == 1){
+      p_mat = SimSummary[[1]]$p_mat
+    }else{
+      p_mat = rbind(p_mat, SimSummary[[1]]$p_mat)
+    }
+    
+  }
+  
+  probs_DNB12[[i]] = p_mat 
+  
+}
+
+names(probs_DNB12) = mix_names
+
+# length(probs)
+# dim(probs[[1]])
+
+# rownames(p_combos) = mix_names
+
+# probs_DNB12 = probs
+```
+
+
+Comparison using different numbers of DU clusters
+
+```{r}
+# Note: DU clusters used in Sim 1 Fit 2 same as DU clusters used in Sim 3 Fit 3
+# clust_names_100 = rownames(probs_DNB2[[1]])
+# set.seed(2714)
+# clust_names_50 = sample(clust_names_100, 50, replace = F)
+# clust_names_25 = sample(clust_names_100, 25, replace = F)
+# clust_names_10 = sample(clust_names_100, 10, replace = F)
+
+df_100 = p_dfA(pList = probs_DNB12, mix_labels = mix_names, clust_names = clust_names_100,
+              p_combos = p_combos, out_remove = F)
+df_100$ClustNum = "100 Clusters"
+
+df_50 = p_dfA(pList = probs_DNB12, mix_labels = mix_names, clust_names = clust_names_50,
+              p_combos = p_combos, out_remove = F)
+df_50$ClustNum = "50 Clusters"
+
+df_25 = p_dfA(pList = probs_DNB12, mix_labels = mix_names, clust_names = clust_names_25,
+              p_combos = p_combos, out_remove = F)
+df_25$ClustNum = "25 Clusters"
+
+df_10 = p_dfA(pList = probs_DNB12, mix_labels = mix_names, clust_names = clust_names_10,
+              p_combos = p_combos, out_remove = F)
+df_10$ClustNum = "10 Clusters"
+
+# df_ClustNo = rbind(df_100, df_50, df_25)
+df_ClustNo = rbind(df_100, df_50, df_25, df_10)
+```
+
+```{r}
+# Comparison of different numbers of clusters
+# ggplot(data = df_ClustNo) + geom_point(mapping = aes(x = True_p, y = p_est), shape = 1) + 
+#   facet_grid(ClustNum ~ CellType) + geom_abline(slope = 1, intercept = 0) +
+#   xlab("True Proportion") + ylab("Proportion Estimate") +
+#   coord_fixed(ratio = 1, xlim = c(0, 1), ylim = c(0,1)) +
+#   ggtitle("NB Low Overdispersion") +
+#   theme_grey(base_size = 18) +
+#   theme(axis.text.x = element_text(angle = 270), plot.title = element_text(size = 18))
+# ggsave(filename = "Sim_Graphics/Scatter_DirNB_LowDispersion.eps",
+#        width = 6, height = 7, units = "in")
+
+# df_ClustNo$ClustNum = factor(df_ClustNo$ClustNum, levels=c(100,50,25,10))
+df_ClustNo$ClustNum = factor(df_ClustNo$ClustNum, 
+                             levels = c("100 Clusters","50 Clusters","25 Clusters","10 Clusters"))
+
+(DirNBLow = ggplot(data = df_ClustNo) + 
+    geom_point(mapping = aes(x = True_p, y = p_est), shape = 1) + 
+  facet_grid(CellType ~ ClustNum) + geom_abline(slope = 1, intercept = 0) +
+  xlab("True Proportion") + ylab("Proportion Estimate") +
+  coord_fixed(ratio = 1, xlim = c(0, 1), ylim = c(0,1)) +
+  ggtitle("NB Low Overdispersion") +
+  theme_grey(base_size = 18) +
+  theme(axis.text.x = element_text(angle = 270), plot.title = element_text(size = 18)))
+# ggsave(filename = "Sim_Graphics/Scatter_DirNB_LowDispersion.eps", plot = DirNBLow,
+#        width = 7, height = 6, units = "in")
+```
+
+
+```{r}
+# Correlations and SSE 
+
+x_sim1fit2 = corr_SSE(df_list = list(df_100, df_50, df_25, df_10),
+                        col_labels = c("100 Clusters","50 Clusters","25 Clusters","10 Clusters"), 
+                      CT = CT)
+
+kable(x_sim1fit2$corr, digits = 3, caption = "Cell Type Correlation Comparison")
+kable(x_sim1fit2$SSE, digits = 3, caption = "Cell Type SSE Comparison")
+
+df_corr_s1f2 = bar_df(table = x_sim1fit2$corr, 
+                         col_labels = c("100 Clusters","50 Clusters", "25 Clusters","10 Clusters"), 
+                        var_name = "Clusters", value_name = "Correlation")
+df_corr_s1f2$Sim = "NB Low"
+
+df_SSE_s1f2 = bar_df(table = x_sim1fit2$SSE, 
+                        col_labels = c("100 Clusters","50 Clusters", "25 Clusters","10 Clusters"), 
+                       var_name = "Clusters", value_name = "SSE")
+df_SSE_s1f2$Sim = "NB Low"
+
+```
+
+# Dirichlet-Negative Binomial with Blueprint Isoform Dirichlet Alpha Parameters, Moderate Overdispersion
+
+Simulation 2 Fit 2
+
+* Dirichlet-Negative Binomial model using saved Dirichlet alpha parameters from the Blueprint simulations in simulation 11A. (See Bluepring Alpha Parameters.Rmd)
+
+* Negative Binomial variance: $Var(X) = \mu + \frac{1}{\theta} \mu^2$ where $\theta$ between 50 and 60
+
+* Genes with differential isoform usage only (no genes with differential expression)
+
+* Used the 10 generic initial points used in the Blueprint analysis
+
+
+## Scatter Plots
+
+```{r}
+files = NULL
+probs = NULL
+df_100 = NULL
+df_50 = NULL
+df_25 = NULL
+df_10 = NULL
+df_ClustNo = NULL
+```
+
+```{r}
+# Read in data for Simulation 1 Fit 2
+
+# Create 'probs' list
+## Each element of list = matrix of probability estimates for each of the discriminatory
+## clusters used in the fit analysis. 
+
+files = list.files(path = "C:/Users/hheiling/Documents/Longleaf/deconvolution/Simulation_Results/Sim2Fit2/Summary_Probs/", full.names = T)
+
+# Note: There are 5 results files for each mixture file (in order to reduce computation time)
+
+probs_DNB22 = list()
+mix_names = unique(str_sub(basename(files), start = 1, end = 7))
+
+for(i in 1:length(mix_names)){
+  files_i = files[which(str_detect(files, mix_names[i]))]
+  if(length(files_i) != 5) print(basename(files_i))
+  for(j in 1:length(files_i)){
+    # Load SimSummary
+    load(files_i[j])
+    if(j == 1){
+      p_mat = SimSummary[[1]]$p_mat
+    }else{
+      p_mat = rbind(p_mat, SimSummary[[1]]$p_mat)
+    }
+    
+  }
+  
+  probs_DNB22[[i]] = p_mat 
+  
+}
+
+names(probs_DNB22) = mix_names
+
+# length(probs)
+# dim(probs[[1]])
+
+# rownames(p_combos) = mix_names
+
+# probs_DNB22 = probs
+```
+
+
+Comparison using different numbers of DU clusters
+
+```{r}
+# Note: DU clusters used in Sim 1 Fit 2 same as DU clusters used in Sim 3 Fit 3
+# clust_names_100 = rownames(probs_DNB2[[1]])
+# set.seed(2714)
+# clust_names_50 = sample(clust_names_100, 50, replace = F)
+# clust_names_25 = sample(clust_names_100, 25, replace = F)
+# clust_names_10 = sample(clust_names_100, 10, replace = F)
+
+df_100 = p_dfA(pList = probs_DNB22, mix_labels = mix_names, clust_names = clust_names_100,
+              p_combos = p_combos, out_remove = F)
+df_100$ClustNum = "100 Clusters"
+
+df_50 = p_dfA(pList = probs_DNB22, mix_labels = mix_names, clust_names = clust_names_50,
+              p_combos = p_combos, out_remove = F)
+df_50$ClustNum = "50 Clusters"
+
+df_25 = p_dfA(pList = probs_DNB22, mix_labels = mix_names, clust_names = clust_names_25,
+              p_combos = p_combos, out_remove = F)
+df_25$ClustNum = "25 Clusters"
+
+df_10 = p_dfA(pList = probs_DNB22, mix_labels = mix_names, clust_names = clust_names_10,
+              p_combos = p_combos, out_remove = F)
+df_10$ClustNum = "10 Clusters"
+
+# df_ClustNo = rbind(df_100, df_50, df_25)
+df_ClustNo = rbind(df_100, df_50, df_25, df_10)
+
+```
+
+```{r}
+# Comparison of different numbers of clusters
+# ggplot(data = df_ClustNo) + geom_point(mapping = aes(x = True_p, y = p_est), shape = 1) + 
+#   facet_grid(ClustNum ~ CellType) + geom_abline(slope = 1, intercept = 0) +
+#   xlab("True Proportion") + ylab("Proportion Estimate") +
+#   coord_fixed(ratio = 1, xlim = c(0, 1), ylim = c(0,1)) +
+#   ggtitle("NB Moderate Overdispersion") +
+#   theme_grey(base_size = 18) +
+#   theme(axis.text.x = element_text(angle = 270), plot.title = element_text(size = 18))
+# ggsave(filename = "Sim_Graphics/Scatter_DirNB_ModerateDispersion.eps",
+#        width = 6, height = 7, units = "in")
+
+# df_ClustNo$ClustNum = factor(df_ClustNo$ClustNum, levels=c(100,50,25,10))
+df_ClustNo$ClustNum = factor(df_ClustNo$ClustNum, 
+                             levels = c("100 Clusters","50 Clusters","25 Clusters","10 Clusters"))
+
+(DirNBMod = ggplot(data = df_ClustNo) + geom_point(mapping = aes(x = True_p, y = p_est), shape = 1) + 
+  facet_grid(CellType ~ ClustNum) + geom_abline(slope = 1, intercept = 0) +
+  xlab("True Proportion") + ylab("Proportion Estimate") +
+  coord_fixed(ratio = 1, xlim = c(0, 1), ylim = c(0,1)) +
+  ggtitle("NB Moderate Overdispersion") +
+  theme_grey(base_size = 18) +
+  theme(axis.text.x = element_text(angle = 270), plot.title = element_text(size = 18)))
+# ggsave(filename = "Sim_Graphics/Scatter_DirNB_ModerateDispersion.eps", plot = DirNBMod,
+#        width = 7, height = 6, units = "in")
+```
+
+
+```{r}
+# Correlations and SSE 
+
+x_sim2fit2 = corr_SSE(df_list = list(df_100, df_50, df_25, df_10),
+                        col_labels = c("100 Clusters","50 Clusters","25 Clusters","10 Clusters"), 
+                      CT = CT)
+
+kable(x_sim2fit2$corr, digits = 3, caption = "Cell Type Correlation Comparison")
+kable(x_sim2fit2$SSE, digits = 3, caption = "Cell Type SSE Comparison")
+
+df_corr_s2f2 = bar_df(table = x_sim2fit2$corr, 
+                         col_labels = c("100 Clusters","50 Clusters", "25 Clusters","10 Clusters"), 
+                        var_name = "Clusters", value_name = "Correlation")
+df_corr_s2f2$Sim = "NB Moderate"
+
+df_SSE_s2f2 = bar_df(table = x_sim2fit2$SSE, 
+                        col_labels = c("100 Clusters","50 Clusters", "25 Clusters","10 Clusters"), 
+                       var_name = "Clusters", value_name = "SSE")
+df_SSE_s2f2$Sim = "NB Moderate"
+
+```
+
+# Correlations and SSE Comparisons
+
+```{r}
+df_corr = rbind(df_corr_s3f3, df_corr_s2f2, df_corr_s1f2)
+df_SSE = rbind(df_SSE_s3f3, df_SSE_s2f2, df_SSE_s1f2)
+```
+
+
+```{r}
+# fill = factor(Sim, levels = c("Multinomial","NB Moderate","NB Low"))
+# ggplot(data = df_corr, aes(x = CellType, y = Correlation, 
+#                            fill = factor(Sim, levels = c("Multinomial","NB Moderate","NB Low")))) +
+#   facet_grid(. ~ Clusters) + 
+#   geom_bar(stat = "identity", position = position_dodge()) +
+#   scale_fill_manual(values = c("purple","orchid","plum1")) +
+#   coord_cartesian(ylim = c(0,1)) +
+#   theme_grey(base_size = 18) + 
+#   theme(legend.position = "bottom") + labs(fill = "Simulation")
+# ggsave(filename = "Sim_Graphics/Corr_SimCompare_10InitPts.eps",
+#        width = 8, height = 5, units = "in")
+#   
+# ggplot(data = df_SSE, aes(x = CellType, y = SSE, 
+#                           fill = factor(Sim, levels = c("Multinomial","NB Moderate","NB Low")))) +
+#   facet_grid(. ~ Clusters) + 
+#   geom_bar(stat = "identity", position = position_dodge()) +
+#   scale_fill_manual(values = c("purple","orchid","plum1")) +
+#   theme_grey(base_size = 18) +
+#   theme(legend.position = "bottom") + labs(fill = "Simulation")
+# ggsave(filename = "Sim_Graphics/SSE_SimCompare_10InitPts.eps",
+#        width = 8, height = 4, units = "in")
+  
+```
+
+```{r}
+df_corr = df_corr[which(df_corr$Clusters %in% c("50 Clusters","10 Clusters")),]
+df_SSE = df_SSE[which(df_SSE$Clusters %in% c("50 Clusters","10 Clusters")),]
+```
+
+```{r}
+
+ggplot(data = df_corr, aes(x = CellType, y = Correlation,
+                           fill = factor(Sim, levels = c("Multinomial","NB Moderate","NB Low")))) +
+  facet_grid(. ~ Clusters) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual(values = c("purple","orchid","plum1")) +
+  coord_cartesian(ylim = c(0,1)) +
+  theme_grey(base_size = 18) +
+  theme(legend.position = "bottom") + labs(fill = "Simulation")
+# ggsave(filename = "Sim_Graphics/Corr_SimCompare_10InitPts.eps",
+#        width = 7, height = 5, units = "in")
+
+ggplot(data = df_SSE, aes(x = CellType, y = SSE,
+                          fill = factor(Sim, levels = c("Multinomial","NB Moderate","NB Low")))) +
+  facet_grid(. ~ Clusters) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual(values = c("purple","orchid","plum1")) +
+  theme_grey(base_size = 18) +
+  theme(legend.position = "bottom") + labs(fill = "Simulation")
+# ggsave(filename = "Sim_Graphics/SSE_SimCompare_10InitPts.eps",
+#        width = 7, height = 5, units = "in")
+```
+
+
+# Dirichlet-Negative Binomial with High Isoform Dist Effect Size
+
+Simulation 2 Fit 1
+
+* Dirichlet-Negative Binomial model using high effect size Dirichlet alpha parameters. (See "Simulation 1 Documentation Dirichlet-NB.Rmd" for details)
+
+* Negative Binomial variance: $Var(X) = \mu + \frac{1}{\theta} \mu^2$ where $\theta$ between 90 and 120
+
+* Genes with differential isoform usage only (no genes with differential expression)
+
+* Used the 10 generic initial points used in the Blueprint analysis
+
+## Scatter Plots
+
+```{r, eval=FALSE}
+# Read in data for Simulation 2 Fit 1
+
+# Create 'probs' list
+## Each element of list = matrix of probability estimates for each of the discriminatory
+## clusters used in the fit analysis. 
+
+files = list.files(path = "C:/Users/hheiling/Documents/Longleaf/deconvolution/Simulation_Results/Sim2Fit1/Summary_Probs/", full.names = T)
+
+# Note: There are 5 results files for each mixture file (in order to reduce computation time)
+
+probs = list()
+mix_names = unique(str_sub(basename(files), start = 1, end = 7))
+
+for(i in 1:length(mix_names)){
+  files_i = files[which(str_detect(files, mix_names[i]))]
+  if(length(files_i) != 5) print(basename(files_i))
+  for(j in 1:length(files_i)){
+    # Load SimSummary
+    load(files_i[j])
+    if(j == 1){
+      p_mat = SimSummary[[1]]$p_mat
+    }else{
+      p_mat = rbind(p_mat, SimSummary[[1]]$p_mat)
+    }
+    
+  }
+  
+  probs[[i]] = p_mat 
+  
+}
+
+names(probs) = mix_names
+
+# length(probs)
+# dim(probs[[1]])
+
+rownames(p_combos) = mix_names
+
+probs_DNB1 = probs
+```
+
+
+Comparison using different numbers of DU clusters
+
+```{r, eval=FALSE}
+# Note: clusters used in Sim 1 Fit 1 are the same clusters used in Sim 3 Fit 3 and Sim 1 Fit 2
+# clust_names_100 = rownames(probs_DNB1[[1]])
+# set.seed(2714)
+# clust_names_50 = sample(clust_names_100, 50, replace = F)
+# clust_names_25 = sample(clust_names_100, 25, replace = F)
+# clust_names_10 = sample(clust_names_100, 10, replace = F)
+
+# df_100 = p_dfA(pList = probs_DNB1, mix_labels = mix_names, clust_names = clust_names_100,
+#               p_combos = p_combos, out_remove = F)
+# df_100$ClustNum = 100
+# 
+# df_ClustNo = df_100
+
+df_100 = p_dfA(pList = probs_DNB1, mix_labels = mix_names, clust_names = clust_names_100,
+              p_combos = p_combos, out_remove = F)
+df_100$ClustNum = "100 Clusters"
+
+df_50 = p_dfA(pList = probs_DNB1, mix_labels = mix_names, clust_names = clust_names_50,
+              p_combos = p_combos, out_remove = F)
+df_50$ClustNum = "50 Clusters"
+
+df_25 = p_dfA(pList = probs_DNB1, mix_labels = mix_names, clust_names = clust_names_25,
+              p_combos = p_combos, out_remove = F)
+df_25$ClustNum = "25 Clusters"
+
+df_10 = p_dfA(pList = probs_DNB1, mix_labels = mix_names, clust_names = clust_names_10,
+              p_combos = p_combos, out_remove = F)
+df_10$ClustNum = "10 Clusters"
+
+# df_ClustNo = rbind(df_100, df_50, df_25)
+df_ClustNo = rbind(df_100, df_50, df_25, df_10)
+df_ClustNo$ClustNum = factor(df_ClustNo$ClustNum, 
+                             levels = c("100 Clusters","50 Clusters","25 Clusters","10 Clusters"))
+
+```
+
+```{r, eval=FALSE}
+# Comparison of different numbers of clusters
+ggplot(data = df_ClustNo) + geom_point(mapping = aes(x = True_p, y = p_est), shape = 1) + 
+  facet_grid(ClustNum ~ CellType) + geom_abline(slope = 1, intercept = 0) +
+  xlab("True Proportion") + ylab("Proportion Estimate") +
+  coord_fixed(ratio = 1, xlim = c(0, 1), ylim = c(0,1)) +
+  theme_grey(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 270))
+```
+
+```{r, eval=FALSE}
+# Correlations and SSE 
+x_sim1fit1 = corr_SSE(df_list = list(df_100, df_50, df_25, df_10),
+                        col_labels = c("100 Clusters","50 Clusters","25 Clusters","10 Clusters"), 
+                      CT = CT)
+
+kable(x_sim1fit1$corr, digits = 3, caption = "Cell Type Correlation Comparison")
+kable(x_sim1fit1$SSE, digits = 3, caption = "Cell Type SSE Comparison")
+
+df_corr_s1f1 = bar_df(table = x_sim1fit1$corr, 
+                         col_labels = c("100 Clusters","50 Clusters", "25 Clusters","10 Clusters"), 
+                        var_name = "Clusters", value_name = "Correlation")
+df_corr_s1f1$Sim = "DirNB High Effect"
+
+df_SSE_s1f1 = bar_df(table = x_sim1fit1$SSE, 
+                        col_labels = c("100 Clusters","50 Clusters", "25 Clusters","10 Clusters"), 
+                       var_name = "Clusters", value_name = "SSE")
+df_SSE_s1f1$Sim = "DirNB High Effect"
+
+```
+
+
+
+
+```{r, eval=FALSE}
+df_corr = rbind(df_corr_s3f3, df_corr_s1f2, df_corr_s1f1)
+df_SSE = rbind(df_SSE_s3f3, df_SSE_s1f2, df_SSE_s1f1)
+```
+
+
+```{r, eval=FALSE}
+ggplot(data = df_corr, aes(x = CellType, y = Correlation, fill = Sim)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual(values = c("purple","orchid","plum1")) +
+  coord_cartesian(ylim = c(0,1)) +
+  theme_grey(base_size = 11) + 
+  theme(legend.position = "bottom") + labs(fill = "Simulation")
+  
+ggplot(data = df_SSE, aes(x = CellType, y = SSE, fill = Sim)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual(values = c("purple","orchid","plum1")) +
+  theme_grey(base_size = 11) +
+  theme(legend.position = "bottom") + labs(fill = "Simulation")
+  
+```
+
+
+
+The End

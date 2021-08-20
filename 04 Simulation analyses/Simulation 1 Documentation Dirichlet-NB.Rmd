@@ -1,0 +1,501 @@
+---
+title: "Simulation Documentation"
+author: "Hillary Heiling"
+date: "January 22, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+This document performs the steps, outlined in "Simulation Step Overview.Rmd", used to set-up and perform simulations to test the package `IsoDeconvMM`. 
+
+* Sim 2 Fit 1: The dispersion parameter in the negative binomial model (for the exon set counts) will change so that the negative binomial variation increases. (Old range of dispersion parameter: 1/90 to 1/120. New range of dispersion parameter: 1/10 to 1/20)
+
+* Sim 2 Fit 2: The Dirichlet alpha parameters will be informed by the Blueprint data analysis. Alpha parameters from the 7A Blueprint simulation series will be collected, filtered such that divergent and `NA` alpha values are removed and only clusters with isoforms between 3 and 15 are considered, and multiplied by a constant of 5. This constant of 5 comes from the "Blueprint Alpha Parameters.Rmd" document, where the isoform Dirichlet alpha values were compared with the alpha parameters output by the fit algorithm for pure sample estimation. The median ratio comparing the algorithm output alpha values to the input alpha values was 0.2, indicating that alpha values from the Blueprint data analysis should be multiplied by 5 for use in this Dirichlet-NB simulation.The dispersion parameter range will be the same as Sim 2 Fit 1.
+
+A total of 5,172 genes were selected for the simulation (see "Gene Samples and EffLen Design Matrix.Rmd" for documentation of how these genes were selected). Of these approx. 5,000 genes, 1,000 were chosen to be 'genes of interest', where various subsets of these 1,000 genes will be used in the `IsoDeconvMM` fitting procedure (see "Gene Samples and EffLen Design Matrix.Rmd" for documentation of how these 1,000 genes were selected). 
+
+100 of the 1,000 'genes of interest' will be selected for differential expression, and another 100 of the 1,000 'genes of interest' (non-overlapping with the genes chosen for differential expression) will be selected for differential isoform usage.
+
+Initial gene counts for all 5,172 genes will be determined by (a) randomly selecting a probability vector from the Dirichlet distribution fit to the 5,172 total genes based on UCLA data (documentation in "Gene Samples and EffLen Design Matrix.Rmd") and (b) simulating a specified total read count number from a multinomial distribution with the probability vector from (a). Genes specified for differential expression will have their gene counts modified in one of the cell types.
+
+Exon set counts for the 1,000 genes of interest will be calculated based on the procedure outlined in "Simulation Step Overview.Rmd". Exon set counts for the other 4,172 genes will be arbitrarily distributed approx. uniformly over all of the possible single exon sets for the genes. For the remaining 4,172 genes that are not the 1,000 'genes of interest', these genes primary function are to contribute to a realistic distribution of gene counts. Therefore, we only need to calculate a realistic gene count for each of these genes (based on the Dirichlet model fit to the UCLA data); we don't necessarily care about a 'realistic' distribution of counts across isoforms and specific exon sets because these gene clusters will not be used in the `IsoDeconvMM` fit algorithm.
+
+Once the exon set counts are determined for all pure cell type reference samples, exon set counts for mixture samples will be created from a subset of these reference sample results (the other samples not used for mixture sample creation will be used in the `IsoDeconvMM` model fit).
+
+**Additional Simulation Details:**
+
+Dispersion parameter range: In the negative binomial variance formula $Var(x) = \mu_g + \frac{1}{\theta}\mu_g^2$, $\theta$ will range from 90 to 120 for all simulations.
+
+* Sim 1 Fit 1: The Dirichlet alpha parameters for the isoform distribution will be given artificial values. For each cluster, each cell type will have a single cluster that is highly expressed in that cell type but is minimally expressed in the other two cell types. 
+
+* Sim 1 Fit 2: The Dirichlet alpha parameters will be informed by the Blueprint data analysis. Alpha parameters from the 11A Blueprint simulation series will be collected, filtered such that divergent and `NA` alpha values are removed, and multiplied by a constant of 5. This constant of 5 comes from the "Blueprint Alpha Parameters.Rmd" document, where the isoform Dirichlet alpha values were compared with the alpha parameters output by the fit algorithm for pure sample estimation. The median ratio comparing the algorithm output alpha values to the input alpha values was 0.2, indicating that alpha values from the Blueprint data analysis should be multiplied by 5 for use in this Dirichlet-NB simulation. The creation of the `alpha_collect11A` list object found in the "Blueprint Alpha Parameters.Rmd" document.
+
+## Load Materials
+
+Load the materials created in previous documentation that will be needed for the simulation
+
+* nTE_filtered: data.frame containing geneId and clustID information for the 1,000 'genes of interest' (to be used in the `IsoDeconvMM` fit algorithm) sutsetted from the 5,172 total genes selected for simulation. Procedure of creating nTE_filtered from original nTE object documented in "Gene Samples and EffLen Design Matrix.Rmd"
+
+* other_geneInfo: list containing nTE_other and exon_sets_other. nTE_other is a data.frame containing geneId and clustID information for the other (5,172 - 1,000 = 4,172) genes selected for the simulation but not of particular interest for the `IsoDeconvMM` fit algorithm. The exon_sets_other is a character vector of sigular exon sets for these 4,172 genes. Procedure to create these items documented in "Gene Samples and EffLen Design Matrix.Rmd"
+
+* X_info: list containing effective length design matrix and exon set information for each of the 1,000 clusters of interest. Procedure to create this object documented in "Gene Samples and EffLen Design Matrix.Rmd"
+
+* genes_alpha: alpha values for the Dirichlet distribution needed for the "Total Reads to Gene Parameters" section outlined in "Simulation Step Overview.Rmd". Fitting of Dirichlet model and calculation of alpha values documented in "Gene Samples and EffLen Design Matris.Rmd"
+
+* isoAll: known isoforms object for human data. When loaded, this object is a list where each component is a binary matrix that specifies a set of possible isoforms (e.g., isoforms from annotations). Specifically, it is a binary matrix of k rows and m columns, where k is the number of 
+non-overlapping exons and m is the number of isoforms. isoforms[i,j]=1 indicates that the i-th exon belongs to the j-th isoform. For example, the following matrix indicates the three isoforms for one gene ENSMUSG00000000003:
+
+```
+     ENSMUST00000000003 ENSMUST00000166366 ENSMUST00000114041
+[1,]                  1                  1                  1
+[2,]                  1                  1                  1
+[3,]                  1                  1                  1
+[4,]                  1                  1                  0
+[5,]                  1                  1                  1
+[6,]                  1                  1                  1
+[7,]                  1                  1                  1
+[8,]                  1                  0                  0
+```
+
+Instructions for creating such an RData object can be found in the Create_BED_knownIsoforms_Files directory in the GitHub repo hheiling/deconvolution, <https://github.com/hheiling/deconvolution>
+
+Load materials
+
+```{r}
+# nTE_filtered
+load("Human_Materials/Homo_sapiens.GRCh37.66.nTE.filtered.RData")
+
+# nTE
+load("Human_Materials/Homo_sapiens.GRCh37.66.nTE.RData")
+
+# X_info
+load("Human_Materials/Effective Length Design Matrices.RData")
+
+# genes_alpha
+load("Human_Materials/Dirichlet_UCLA_gene_alpha.RData")
+
+# isoAll
+load("Human_Materials/Homo_sapiens.GRCh37.66.nonoverlap.exon.knownIsoforms.RData")
+
+# other_geneInfo
+load("Human_Materials/Homo_sapiens.GRCh37.66.other.geneInfo.RData")
+
+# alpha_collect list object (from 11A Blueprint simulations)
+## See Blueprint Alpha Parameters.Rmd for creation
+load("Blueprint_Alpha_Collection_11A.RData")
+```
+
+Needed libraries
+
+```{r}
+library(MASS)
+library(DirichletReg)
+library(stringr)
+library(Rcpp)
+library(RcppArmadillo)
+
+```
+
+Source relevent functions needed for simulations in "Simulation_Ideas/geneModel_code" folder
+
+```{r}
+source("geneModel_code/sim_functions.R")
+```
+
+```{r, eval=FALSE}
+sourceCpp(file = "geneModel_code/fragLens_dist.cpp")
+```
+
+Generate random seeds to be used in the simulation
+
+```{r}
+set.seed(2020)
+seeds = sample(1000:9999, size = 50, replace = F)
+seeds
+```
+
+## Calculate Relevant Parameters and Output for Cell Types 1, 2, and 3
+
+Specifying n = number pure cell reference files per cell type and total_cts = total gene counts for each sample
+
+Details:
+
+* Want 3 cell types
+
+* Want 20 pure cell reference files per cell type
+
+* Assume total read counts is distributed normally with mean 7 million and sd 1 million
+
+```{r}
+# Number pure cell reference files to create
+n = 20
+# Number cell types
+J = 3
+
+# Total counts for each sample
+set.seed(seeds[1])
+total_cts = matrix(round(rnorm(n = n*J, mean = 7*10^6, sd = 10^6)), nrow = n, ncol = J)
+
+colnames(total_cts) = 1:J
+rownames(total_cts) = str_c("ref_",1:n)
+
+```
+
+Calculate initial gene counts across samples.
+
+```{r}
+# Output: list of probability matrix (p_mat), count matrix (c_mat), gene names(gene_names),
+#     and theta parameters for n*J samples. ct_mat will be modified in diff_exp() later
+#     p_mat and c_mat: first n columns = CT1, second n cols CT2, third n cols CT3; rows = all genes
+geneInfo = gene_level(total_cts = total_cts, gene_alpha = gene_alpha, seed = seeds[2])
+
+```
+
+```{r, eval=FALSE}
+# save(geneInfo, file = "Simulated_Output/initial_geneInfo.RData")
+```
+
+Select genes for differential expression (100 of 1000) and differential isoform usage (100 of 1000, not overlapping with differential expression genes).
+
+```{r}
+# Output: matrix where col 1 ("diffExp") = boolean value of whether gene is differentially 
+#     expressed (1) or not (0), and col 2 ("diffUsg") = boolean value of whether gene will have
+#     differential isoform usage (1) or not (0). Rownames correspond to gene names
+# At this point, all cell types similar, so use expression from CT1 counts to figure out
+#   which genes have relatively high expression across samples
+diffGeneInfo = diff_genes(CT1_counts = geneInfo$ct_mat[,1:n], nTE_filtered = nTE_filtered, 
+                          num_diff = 200, seed = seeds[3])
+
+# Check that chosen genes for diff exp and diff iso usage came from nTE_filtered genes
+sum(rownames(diffGeneInfo[which(diffGeneInfo[,"diffExp"] == 1),]) %in% nTE_filtered$geneId)
+sum(rownames(diffGeneInfo[which(diffGeneInfo[,"diffUsg"] == 1),]) %in% nTE_filtered$geneId)
+sum(rownames(diffGeneInfo[which(diffGeneInfo[,"noDiff"] == 1),]) %in% nTE_filtered$geneId)
+```
+
+```{r}
+# Identify and save gene names specified for differential expression and differential isoform usage
+# differential expression
+genesDiffExp = rownames(diffGeneInfo[which(diffGeneInfo[,"diffExp"] == 1),])
+# differential isoform usage
+genesDiffUsage = rownames(diffGeneInfo[which(diffGeneInfo[,"diffUsg"] == 1),])
+# genes with no differential expression/usage to be used for false positives
+genesNoDiff = rownames(diffGeneInfo[which(diffGeneInfo[,"noDiff"] == 1),])
+# save results in data.frame
+genes_df = data.frame(diffExp = genesDiffExp, diffUsg = genesDiffUsage, noDiff = genesNoDiff)
+
+```
+
+```{r, eval=FALSE}
+# save(genes_df, file = "Simulated_Output/genes_simulated_w_diffExp_diffUsg.RData")
+```
+
+Specify and apply fold changes to gene counts for genes specified to have differential expression in one of the cell types (Cell Type 2). A random component was introduced to the fold change so there is some variation across samples.
+
+```{r}
+# Output: New gene counts matrix where CT2 has differentially expressed genes compared to CT1 and CT3
+#     matrix same dimension and organization of geneInfo$ct_mat
+geneCtDiffExp = diff_exp(gene_counts = geneInfo$ct_mat, n = n, J = J, 
+                         CT_diffExp = 2, diff_genes_mat = diffGeneInfo, 
+                         propUp = 0.30, seed = seeds[4])
+```
+
+Check to make sure the ending fold changes for these 100 genes in Cell Type 2 are as expected. 
+
+In the following histogram, this looks at the ratio of counts after vs before fold changes were applied (regarding the 100 genes specified for differential expression).
+
+Expected: average log2 fold changes between $log2(1.6) \approx 0.68$ and $log2(2.0) = 1.0$ (both positive and negative) across all of the samples of Cell Type 2 for the 100 genes specified to have differential expression.
+
+```{r}
+fc_check = calc_diffExp(gene_counts_new = geneCtDiffExp[,(1+n):(2*n)], 
+                        gene_counts_orig = geneInfo$ct_mat[,(1+n):(2*n)],
+                        diff_genes_mat = diffGeneInfo)
+
+hist(log2(fc_check$fc_avg))
+
+summary((fc_check$fc_avg))
+```
+
+On the individual sample scale, things look good.
+
+Check of overall differential expression across cell types. Group cell types 1 and 3 together, compare collectively with cell type 2.
+
+```{r}
+# Normalize total gene count across all samples
+norm_factor = 1*10^6 / colSums(geneCtDiffExp) # Normalize to mean value 7 million
+ct_norm = geneCtDiffExp * matrix(norm_factor, nrow = nrow(geneCtDiffExp), 
+                                   ncol = length(norm_factor), byrow = T)
+
+head(colSums(ct_norm))
+
+# Split into the two groups
+groups_13 = ct_norm[which(rownames(geneCtDiffExp) %in% genesDiffExp),c(1:n, (2*n+1):(3*n))]
+groups_2 = ct_norm[which(rownames(geneCtDiffExp) %in% genesDiffExp),(n+1):(2*n)]
+
+# Find overall expression ratio
+exp_ratios = rowMeans(groups_2) / rowMeans(groups_13)
+
+# Results
+hist(log2(exp_ratios))
+
+hist(exp_ratios)
+
+summary(exp_ratios)
+
+# exp_ratios[which(log2(exp_ratios) > -0.5 & log2(exp_ratios) < 0.5)]
+```
+
+These results look pretty close to expected (although with a bit more spread than in the previous histogram).
+
+A sampling of side-by-side box-plots of the expression of genes between the cell types.
+
+```{r}
+# Normalize total gene count across all samples
+norm_factor = 1 / colSums(geneCtDiffExp) # Normalize to mean value 7 million
+ct_norm = geneCtDiffExp * matrix(norm_factor, nrow = nrow(geneCtDiffExp), 
+                                   ncol = length(norm_factor), byrow = T)
+
+head(colSums(ct_norm))
+
+# Up-regulated genes
+up_reg = names(fc_check$fc_avg[which(fc_check$fc_avg > 1)])
+# Down-regulated genes
+down_reg = names(fc_check$fc_avg[which(fc_check$fc_avg < 1)])
+
+# Split into the two groups
+groups_13 = ct_norm[which(rownames(geneCtDiffExp) %in% genesDiffExp),c(1:n, (2*n+1):(3*n))]
+groups_2 = ct_norm[which(rownames(geneCtDiffExp) %in% genesDiffExp),(n+1):(2*n)]
+
+# Side-by-side box plots
+## Each plot represents normalized expression for a single gene across the 
+## two groups of samples
+
+par(mfrow = c(4,4), mar = c(2,2,1,1))
+for(i in 1:16){
+  boxplot(groups_13[i,], groups_2[i,],
+          names = c("CT1 & CT3","CT2"))
+}
+# par(mfrow = c(4,4), mar = c(2,2,1,1))
+# for(i in 17:32){
+#   boxplot(groups_13[i,], groups_2[i,],
+#           names = c("CT1 & CT3","CT2"))
+# }
+# par(mfrow = c(4,4), mar = c(2,2,1,1))
+# for(i in 33:48){
+#   boxplot(groups_13[i,], groups_2[i,],
+#           names = c("CT1 & CT3","CT2"))
+# }
+# par(mfrow = c(4,4), mar = c(2,2,1,1))
+# for(i in 49:64){
+#   boxplot(groups_13[i,], groups_2[i,],
+#           names = c("CT1 & CT3","CT2"))
+# }
+# par(mfrow = c(4,4), mar = c(2,2,1,1))
+# for(i in 65:80){
+#   boxplot(groups_13[i,], groups_2[i,],
+#           names = c("CT1 & CT3","CT2"))
+# }
+# par(mfrow = c(4,4), mar = c(2,2,1,1))
+# for(i in 81:96){
+#   boxplot(groups_13[i,], groups_2[i,],
+#           names = c("CT1 & CT3","CT2"))
+# }
+# par(mfrow = c(2,2), mar = c(2,2,1,1))
+# for(i in 97:100){
+#   boxplot(groups_13[i,], groups_2[i,],
+#           names = c("CT1 & CT3","CT2"))
+# }
+
+```
+
+## Sim 1 Fit 2 (Blueprint Alpha Used)
+
+Find cluster, isoform, and exon set level information for the 1,000 genes of interest for all cell types. 
+
+For the 100 genes specified to have differential isoform usage: each cell type will have a different dirichlet distribution specified for these isoforms across the samples of the different cell types. 
+
+Description of different dirichlet distribution classes used:
+
+In the Blueprint simulation, alpha values for each cluster were saved during the IsoDeconvMM algorithm fit. The selection process for these clusters is explained in the "Blueprint_IsoDetect_results.Rmd" document in the Blueprint_Simulation subfolder of the deconvolution directory. Based on the alpha parameters saved from the Sim 1 Fit 1 simulation, the alpha saved from the IsoDeconvMM algorithm (which uses a Dirichlet-Multinomial model) is approximately 0.2 times the equivalent alpha parameters used in this simulation, which utilizes a Dirichlet-Negative Binomial model. 
+
+In the document "Blueprint Alpha Parameters.Rmd", alpha values from a Blueprint simulation (simulation 11A) were saved for clusters that had between 3 and 15 isoforms. These alpha parameters, multiplied by 1/0.2 = 5 will be used in the simulation in an attempt to make the distribution of isoforms more realistic.
+
+The above mentioned Blueprint alpha parameters will be used for those genes specified to have differential isoform usage. For all other genes, they will be given a generic uniform isoform distribution (for all three cell types, all alpha values describing the isoform Dirichlet distribution will have the value of 10).
+
+The gene counts for the 'other' 4,172 genes will be approx. evenly distributed among the singular exon sets associated with the gene cluster. 
+
+```{r}
+
+alpha_collect = alpha_collect11A
+
+# Determine which genes should have differential isoform usate
+# Note: gene clusters chosen so number isoforms 3 <= I <= 15 for all genes
+diffUsg = ifelse(nTE_filtered$geneId %in% genesDiffUsage, 1, 0)
+
+names(diffUsg) = nTE_filtered$geneId
+
+# Check
+sum(diffUsg)
+
+# Alpha collection to use for each gene
+## Will store the alpha parameters to use for all three cell types
+## Selection of correct cell type parameters will occure in iso_exon_info_MM() function
+alpha_record = list()
+
+# names of 1,000 clusters of interest used in simulation
+clust_names = nTE_filtered$clustID
+ 
+set.seed(1323)
+for(clust in clust_names){
+    
+    # name of gene associated with cluster
+    gene = nTE_filtered$geneId[which(clust_names == clust)]
+    # Effective length matrix - ExI (num exon sets x num isoforms)
+    X = X_info[[clust]]$X
+    # number isoforms
+    I = ncol(X)
+    # Indicator to whether this gene should have differential isoform usage
+    indic = diffUsg[which(names(diffUsg) == gene)]
+    if(indic == 1){
+      # dirichlet alpha parameters for isoforms
+      ## Randomly select a saved alpha parameter collection from saved Blueprint results
+      ## based on number of isoforms (dimension Ix3)
+      ## Multiply it by constant of 5 based on exploratory work in "Blueprint Alpha Parmaeters.Rmd"
+      samp = sample(1:length(alpha_collect[[I]]), size = 1)
+      alpha = alpha_collect[[I]][[samp]] * 5
+      
+    }else{
+      # Give isoforms arbitrary uniform distribution (same for all cell types)
+      alpha = matrix(10, nrow = I, ncol = 3)
+    }
+    
+    alpha_record[[clust]] = alpha
+}
+
+
+
+# Output for iso_exon_info(): for each cluster corresponding to the 1,000 genes of interest, 
+#     records the alpha parameters for the isoform dirichlet dist (iso_alpha), 
+#     the probability vector associated with the isoform distribution (rho),
+#     the negative binomial mean parameters for all relevant exon sets (mu),
+#     and a character vector of the relevant exon sets (exon_sets)
+
+iso_exon_1000_S1F2 = list()
+
+iso_exon_1000_S1F2[["CT1"]] = iso_exon_info4(genes_info = geneCtDiffExp[which(rownames(geneCtDiffExp) %in% nTE_filtered$geneId),1:n],
+                                       nTE_filtered = nTE_filtered, EffLen_info = X_info, 
+                                       CT = 1, alpha_record = alpha_record, seed = seeds[5])
+
+iso_exon_1000_S1F2[["CT2"]] = iso_exon_info4(genes_info = geneCtDiffExp[which(rownames(geneCtDiffExp) %in% nTE_filtered$geneId),(n+1):(2*n)],
+                                       nTE_filtered = nTE_filtered, EffLen_info = X_info, 
+                                       CT = 2, alpha_record = alpha_record, seed = seeds[6])
+
+iso_exon_1000_S1F2[["CT3"]] = iso_exon_info4(genes_info = geneCtDiffExp[which(rownames(geneCtDiffExp) %in% nTE_filtered$geneId),(2*n+1):(3*n)],
+                                       nTE_filtered = nTE_filtered, EffLen_info = X_info, 
+                                       CT = 3, alpha_record = alpha_record, seed = seeds[7])
+
+```
+
+```{r, eval=FALSE}
+# save(iso_exon_1000_S1F2, file = "Simulated_Output/Iso_Exon_Params_1000_Sim1Fit2.RData")
+```
+
+
+## 'Other' Cluster Counts
+
+```{r}
+
+# Identify 'other' signular exon sets
+exon_sets_other = other_geneInfo$exon_sets_other
+nTE_other = other_geneInfo$nTE_other
+
+# Output for other_exonset_count(): for each cluster corresponding to the 'other' 4,017 genes,
+#     records the exon sets with single exons for all isoforms (exon_sets),
+#     and a counts matrix for each of these singular exon sets based on arbitrarily 
+#     distributing the count for a gene approx. uniformly across these exon sets.
+iso_exon_other = list()
+
+iso_exon_other[["CT1"]] = other_exonset_count(genes_info = geneCtDiffExp[which(rownames(geneCtDiffExp) %in% nTE_other$geneId),1:n],
+                                              nTE_other = nTE_other,
+                                              exon_sets_other = exon_sets_other,
+                                              iso_dist = rep("uniform", times = nrow(nTE_other)),
+                                              alphaRange = c(20,50), seed = seeds[8])
+
+iso_exon_other[["CT2"]] = other_exonset_count(genes_info = geneCtDiffExp[which(rownames(geneCtDiffExp) %in% nTE_other$geneId),(n+1):(2*n)],
+                                              nTE_other = nTE_other,
+                                              exon_sets_other = exon_sets_other,
+                                              iso_dist = rep("uniform", times = nrow(nTE_other)),
+                                              alphaRange = c(20,50), seed = seeds[9])
+
+iso_exon_other[["CT3"]] = other_exonset_count(genes_info = geneCtDiffExp[which(rownames(geneCtDiffExp) %in% nTE_other$geneId),(2*n+1):(3*n)],
+                                              nTE_other = nTE_other,
+                                              exon_sets_other = exon_sets_other,
+                                              iso_dist = rep("uniform", times = nrow(nTE_other)),
+                                              alphaRange = c(20,50), seed = seeds[10])
+```
+
+```{r, eval=FALSE}
+# save(iso_exon_other, file = "Simulated_Output/Iso_Exon_Counts_Other.RData")
+```
+
+## Record Exon Set Counts in counts.txt Files
+
+In this step, exon set counts are (a) simulated from the exon set negative binomial parameters for the 1,000 genes of interest and (b) recorded from the `iso_exon_other` list output. These exon set counts are then concatenated into one file for each sample and stored in a counts.txt file in the same output format as the function `countReads()` from the `isoform` R package. These count files are stored in the "Simulated_Output/Pure Sample Counts" folder.
+
+```{r}
+library(MASS)
+library(stringr)
+# rnegbin(n = number of sample values, mu = vector of means, theta = vector of theta parameters or scalar that is recycled)
+
+# Simulate and record exon set counts 
+## count.txt files saved in folder Simulated_Output/Pure Sample Counts
+
+rep_pure = c(str_c("0",1:9),10:n)
+
+files1 = str_c("CT1_ref_",rep_pure,"_counts")
+files2 = str_c("CT2_ref_",rep_pure,"_counts")
+files3 = str_c("CT3_ref_",rep_pure,"_counts")
+
+```
+
+```{r, eval=FALSE}
+
+# Sim 1 Fit 2
+counts_output(exonInfo_1000 = iso_exon_1000_S1F2, exonInfo_other = iso_exon_other,
+              theta = geneInfo$theta,
+              file_labels = c(files1, files2, files3),
+              folder = "Simulated_Output/Sim1_Fit2_Pure_Sample_Counts", seed = seeds[11])
+
+
+```
+
+
+## Create mixture samples
+
+The mixture files will be created during the simulation process. They will be created using the `mixture_creation2` function in the file "sim_functions.R".  See "sim1_fit2_mixtures.R" in "sim1_code" folder
+
+## Create Fragment length files for mixtures samples
+
+For the purposes of this simulation, we will assume that the fragment length distribution is the same across all samples. Therefore, in an attempt to simplify the number of files created and used for the simulation, only one fragment length distribution file will be created. This file will be recycled for all `IsoDeconvMM` fit procedures for all mixture samples.
+
+```{r, eval=FALSE}
+
+fragLens_out = function(total_reads = 2*10^7, mean = 300, SD = 50, lenMin = 150, lenMax = 600,
+                        out_file, seed){
+  # fragLens_dist() in geneModel_code/fragLens_dist.cpp file
+  freq_dist = fragLens_dist(total_reads, mean, SD, lenMin, lenMax)
+  freq_dist = freq_dist[which(freq_dist[,1] > 0),]
+  write.table(freq_dist, file = out_file, col.names = F, row.names = F)
+}
+
+fragLens_out(total_reads = 2*10^7, mean = 300, SD = 50, lenMin = 150, lenMax = 600,
+             out_file = "Simulated_Output/sim_fraglens.txt", seed = seeds[14])
+
+```
+
+
+The End

@@ -1,0 +1,547 @@
+---
+title: "EffLen Design Matrix"
+author: "Hillary Heiling"
+date: "February 6, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview
+
+Goal: Document the steps used to perform the following tasks:
+
+* Isolate approx. 5,000 genes to use for upcoming simulations based on UCLA data.
+
+* Fit "realistic" Dirichlet distribution for these 5,000
+
+* Filter gene clusters for clusters with desired criteria (only one gene per cluster, gene has 3+ isoforms ...) and sample 1000 gene clusters from the results
+
+* Find possible exon sets and create string labels for each set modeled after the labels given to exon sets in the `countReads()` output (isoform package). (For 1000 genes of interest)
+
+* Calculate effective length design matrix for possible exon sets. (For 1000 genes of interest)
+
+# Needed libraries and materials:
+
+```{r}
+library(stringr)
+library(gtools)
+
+# Load IsoDeconvMM library:
+# library(remotes)
+# install_github("hheiling/IsoDeconvMM", force = TRUE)
+library(IsoDeconvMM)
+
+# Load isoAll object form knownIsoforms file
+load("Human_Materials/Homo_sapiens.GRCh37.66.nonoverlap.exon.knownIsoforms.RData")
+# Load the nTE object
+load("Human_Materials/Homo_sapiens.GRCh37.66.nTE.RData")
+# Load the eDat object
+eDat = readRDS("Human_Materials/ucla_eDat.rds")
+```
+
+# Gene Clusters of Interest
+
+First, from the nTE information, sample gene clusters where there is only one gene per cluster. Subset the eDat UCLA data based on this sampling. 
+
+Using the eDat information from the UCLA data summary output, select genes with the following qualities:
+
+* Select approx. 10,000 genes from the total 50,000 genes with relatively high expression (ie. the the third quartile of expression accross samples is above 40)
+
+Examine materials of interest: UCLA eDat object, nTE object
+
+```{r}
+# Examine eDat information provided
+dim(eDat)
+# head(rownames(eDat),10) # gene names
+# head(colnames(eDat),10) # sample ID
+eDat[1:5, 1:5]
+
+# Examine initial nTE information provided
+head(nTE, 20)
+```
+
+Summary of UCLA eDat object:  Total number of genes provided in the UCLA eDat information: 57,820 genes. Total number of samples present in the UCLA eDat information: 89 samples. Values within eDat information: expected gene counts. If of interest, see "Human_Materials/step2_check_RSEM_ucla.R" file for further information about how this eDat object was created.
+
+For later coding convenience purposes, remove genes from consideration that belong to a transcript cluster that contains 2 or more genes (based this information off of nTE information).
+
+```{r}
+library(stringr)
+
+all_genes = str_split_fixed(rownames(eDat), "\\.", n = 2)
+
+# Identify clusters with only one gene
+clustID_table = table(nTE$clustID)
+clustID_singular = which(clustID_table == 1)
+nTE_A = nTE[which(nTE$clustID %in% names(clustID_singular)),]
+
+# Check that selection of cluster worked properly
+for(clust in nTE_A$clustID){
+  gene = nTE[which(nTE$clustID == clust),1]
+  if(length(gene) > 1){
+    cat("problem clust: ", clust, "\n")
+  }
+}
+
+# Subset eDat object to genes within these chosen clusters
+eDat_subsetA = eDat[which(all_genes[,1] %in% nTE_A$geneId),]
+
+dim(eDat_subsetA)
+
+```
+
+Total remaining genes after single gene cluster filtering step: 38,851 genes.
+
+Next, remove genes from consideration that have generally low expression across the 89 samples.
+
+```{r}
+select_gene = function(x){
+  q75 = quantile(x, prob = 0.75)
+  if(q75 > 30){
+    return(1)
+  }else{
+    return(0)
+  }
+}
+
+keep = apply(eDat_subsetA, 1, function(x) select_gene(x))
+sum(keep)
+
+eDat_subsetB = eDat_subsetA[which(keep == 1),]
+genes_B = str_split_fixed(rownames(eDat_subsetB), "\\.", n = 2)
+nTE_B = nTE_A[which(nTE_A$geneId %in% genes_B[,1]),]
+dim(eDat_subsetB)
+dim(nTE_B)
+```
+
+Total remaining genes after low expression filtering step: 10,414 genes.
+
+Our goal is to fit a Dirichlet distribution to these genes. However, the Dirichlet fit algorithm used in this process (`DirichReg` function from `DirichletReg` R package) is computationally limited by the number of genes and has issues fitting a Dirichlet distribution to over 10,000 genes. Therefore, we will pick genes from a subset of chromosomes such that the total gene count is closer to 5,000 genes.
+
+```{r}
+
+# Non-sex chromosomes: chromosomes 1 to 22
+num_genes = numeric(22)
+
+# Number of genes from subsetted nTE_A object in these chromosomes
+for(i in 1:22){
+  num_genes[i] = sum(str_detect(nTE_B$clustID, sprintf("chr%i_",i)))
+}
+
+# Examine chromosome summary
+(num_genesDF = data.frame(chr = str_c("chr",1:22), num_genes = num_genes,
+                          cumsum = cumsum(num_genes)))
+
+# Select chromosoms 1-9 to consider approx. 5,000 genes
+nTE_C = nTE_B[c(which(str_detect(nTE_B$clustID, "chr1_")), 
+                which(str_detect(nTE_B$clustID, "chr2_")),
+                which(str_detect(nTE_B$clustID, "chr3_")),
+                which(str_detect(nTE_B$clustID, "chr4_")),
+                which(str_detect(nTE_B$clustID, "chr5_")),
+                which(str_detect(nTE_B$clustID, "chr6_")),
+                which(str_detect(nTE_B$clustID, "chr7_")),
+                which(str_detect(nTE_B$clustID, "chr8_")),
+                which(str_detect(nTE_B$clustID, "chr9_"))),]
+
+dim(nTE_C)
+
+# Subset eDat_subsetB to include just the genes selected in the above filtering steps
+eDat_subsetC = eDat_subsetB[which(genes_B[,1] %in% nTE_C$geneId),]
+
+dim(eDat_subsetC)
+
+```
+
+Based on the above information, we chose genes belonging to chromosomes 1 to 9, resulting in 5,172 genes total used for the simulation.
+
+Now, we will fit a Dirichlet distribution to these genes.
+
+```{r, eval=FALSE}
+# Use counts in eDat_subset to fit a Dirichlet distribution for these genes
+
+# install.packages("DirichletReg")
+library(DirichletReg)
+
+# Convert eDat_subset matrix to rows = observations, cols = genes
+Y_counts = t(eDat_subsetC)
+Y_norm = Y_counts / rowSums(Y_counts)
+Y = DR_data(Y_norm, trafo = T)
+
+# fit intercept-only model
+gene_dir = DirichReg(formula = Y ~ 1, data = NULL, model = "common")
+# Extract alpha values from fit
+fit_dir = fitted.DirichletRegModel(gene_dir, alpha = T)
+# Note: alpha values for a gene same for all observations (just pick a row from alpha output)
+gene_alpha = fit_dir$alpha[1,]
+```
+
+Save Dirichlet results
+
+```{r, eval=FALSE}
+library(stringr)
+
+split_names = str_split_fixed(names(gene_alpha), "\\.", n = 2)
+gene_names = split_names[,1]
+names(gene_alpha) = gene_names
+
+save(gene_alpha, file = "Human_Materials/Dirichlet_UCLA_gene_alpha.RData")
+```
+
+Of these approx. 5,000 genes, we want to chose 1,000 genes that will be the focus of the `IsoDeconvMM` fitting algorithm. In very general terms, this `IsoDeconvMM` algorithm utilizes non-overlapping exon set count information to fit isoform parameters for each pure cell type reference sample, and then uses these isoform parameters plus the mixture sample exon set counts to estimate the deconvolution of cell types in the mixture sample. This algorithm works best if it is provided a list a genes with differential expression and/or differential isoform usage. 
+
+We want to determine realistic exon set counts for 1,000 genes, chose 100 of these genes to be differentially expressed and a separate 100 to have differential isoform usage, and then specify different selection specifications of these 1,000 genes to the `IsoDeconvMM` algorithm in order to examine power differences.
+
+Therefore, from the nTE information, we will sample 1,000 gene clusters with the following qualities so that they are eligible for differential expression and/or differential isoform usage:
+
+* Only consider clusters where the gene has 3 or more isoforms
+
+* Consider clusters with relatively higher expression within the total of 5,172 genes
+
+```{r}
+
+# Limit to clusters with 3+ isoforms
+nTE_subset = nTE_C[which(nTE_C$nT > 2),]
+dim(nTE_subset)
+
+# Select 'top' genes based on median expression values in the UCLA data
+#   and filtering based on 3+ isoforms per gene
+q50 = apply(eDat_subsetC, 1, function(x) quantile(x, prob = 0.50))
+median_q25 = quantile(q50, prob = 0.25)
+gene_options = intersect(nTE_C$geneId[which(q50 > median_q25)],
+                         nTE_subset$geneId)
+length(gene_options)
+
+
+# Sample 1000 genes from above gene_options
+set.seed(19483)
+gene_sample = sample(gene_options, size = 1000, replace = F)
+nTE_sample = nTE_subset[which(nTE_subset$geneId %in% gene_sample),]
+
+# Order sample by chromosome then cluster number within chromosome
+nTE_sample$chr = substr(nTE_sample$clustID, start = 1, stop = 4)
+nTE_sample$ID_num = str_remove(nTE_sample$clustID, str_c(nTE_sample$chr,"_"))
+nTE_filtered = nTE_sample[order(nTE_sample$chr, as.numeric(nTE_sample$ID_num)),]
+
+# Ending result check:
+dim(nTE_filtered)
+head(nTE_filtered, 20)
+
+save(nTE_filtered, file = "Human_Materials/Homo_sapiens.GRCh37.66.nTE.filtered.RData")
+
+```
+
+A total of 2,875 genes both contained 3 or more isoforms and had relatively higher expression. The 1,000 'genes of interest' were sampled from these 2,875 genes.
+
+# Total Count Scale from UCLA Data
+
+In order to provide a realistic total read count for samples in the upcoming simulation, we used the UCLA data to get an idea of the scale for the total counts of the approx. 5000 genes selected for simulation. 
+
+A histogram of the total read counts for these approx. 5,000 genes across the 89 samples in the UCLA data is provided below.
+
+```{r}
+hist(colSums(eDat_subsetC), main = "Total Read Counts for the 5,172 Simulation Genes",
+     xlab = "Total Read Count")
+
+summary(colSums(eDat_subsetC))
+```
+
+It appears that the majority of samples have total read counts between approx. 4.5 million and 9 million samples. 
+
+Based on the above information, we decided it was appropriate to specify total reads with a normal distribution with mean 7 million and sd 1 million. 
+
+# Determining Exon Set Combinations
+
+For the 1,000 'genes of interest' sampled in the section "Gene Clusters of Interest", we eventually want to simulate exon set counts. In order to do this, we first need to identify possible exon sets. After these possible exon sets have been identifyied, we can calculated the effective lengths for these exon sets and eliminate sets from consideration that have effective lengths of 0 (see "Calculate Effective Length Design Matrices" section later in document).
+
+While it may be a simplification of what can be seen in real data, we decided to limit the possible exon sets to consecutive exon sets of length 1, 2, and 3 total exons. In other words, if an isoform contains the numbered exons 2, 3, 5, and 7, then all possible exon sets would be:
+
+* Singular exon sets: {2}, {3}, {5}, {7}
+
+* Double exon sets: {2,3}, {3,5}, {5,7}
+
+* Triple exon sets: {2,3,5}, {3,5,7}
+
+Below is the code to identify these possible exon sets. The results are stored in the same format that exon sets are recorded in the output from the `countReads` function in the `isoform` R package.
+
+Sample output from `countReads` function (first column counts, second column exons):
+
+```{r}
+head(read.table(file = "Mouse_Materials/mm9_set1_counts.txt"))
+```
+
+Possible exon set identification:
+
+```{r}
+# Extract exon set information for gene clusters of interest
+
+exon_sets = list()
+
+for(clust in nTE_filtered$clustID){
+  
+  # Extract non-overlapping exon vs isoform matrix
+  candiIsoform = isoAll[[clust]]
+  iso_names = colnames(candiIsoform)
+  # Extract gene information for each cluster
+  gene = nTE_filtered[which(nTE_filtered$clustID == clust),1]
+  
+  if(length(gene) > 1){
+    cat("clust with too many genes: ", clust, "\n")
+  }
+  
+  # Total isoforms
+  iso_total = ncol(candiIsoform)
+  
+  sets1 = as.character(NULL)
+  sets2 = as.character(NULL)
+  sets3 = as.character(NULL)
+  
+  for(j in 1:iso_total){
+    # Identify exons that appear in isoform j
+    subset_exons = as.character(which(candiIsoform[,j] == 1))
+    num_exons = length(subset_exons)
+  
+    single_sets = str_c(clust, "|", gene, "|", subset_exons, ";")
+  
+    if(num_exons > 1){
+      double_sets = character(num_exons - 1)
+      for(e in 1:(num_exons - 1)){
+        double_sets[e] = str_c(single_sets[e], single_sets[e+1])
+      }
+    }else{
+      double_sets = NULL
+    }
+    
+    if(num_exons > 2){
+      triple_sets = character(num_exons - 2)
+      for(e in 1:(num_exons - 2)){
+        triple_sets[e] = str_c(single_sets[e], single_sets[e+1], single_sets[e+2])
+      }
+    }else{
+      triple_sets = NULL
+    }
+  
+    sets1 = union(sets1, single_sets)
+    sets2 = union(sets2, double_sets)
+    sets3 = union(sets3, triple_sets)
+  
+  }
+
+  # sets_all = list(single_sets = sets1, double_sets = sets2, triple_sets = sets3)
+  
+  sets_all = c(sets1, sets2, sets3)
+  
+  exon_sets[[clust]] = list(candiIsoform = candiIsoform, sets = sets_all)
+  
+}
+
+# Examine output
+head(exon_sets$chr1_4$sets, 10)
+tail(exon_sets$chr1_4$sets, 10)
+length(exon_sets$chr1_4$sets)
+
+```
+
+For the remaining 4,172 genes that are not the 1,000 'genes of interest', these genes primary function are to contribute to a realistic distribution of gene counts. Therefore, we only need to calculate a realistic gene count for each of these genes. However, in the counts files to be simulated, the output must be stored in exon set counts. Unlike the 1,000 genes of interest, though, we don't necessarily care about the distribution of counts across isoforms and specific exon sets because these gene clusters will not be used in the `IsoDeconvMM` fit algorithm, so we only care about the total gene count. 
+
+In order to cut down on unnecessary computation, we can arbitrarily distribute the count for a gene approx. uniformly across the singular exon sets for a gene. As a result, the counts files simulated will still contain realistic total read counts, and this unrealistic distribution across exon sets will go unnoticed by the fit algorithm since none of these genes will be selected for isoform parameter calculations. 
+
+Consequently, for these genes, we will only singluar exon sets (i.e. sets {2}, {3}, {5}, and {7} from the example described earlier).
+
+```{r}
+# Extract exon set information for gene clusters of interest
+
+nTE_other = nTE_C[-which(nTE_C$geneId %in% nTE_filtered$geneId),]
+dim(nTE_other)
+dim(nTE_C)
+dim(nTE_filtered)
+
+exon_sets_other = list()
+
+for(clust in unique(nTE_other$clustID)){
+  
+  # Extract non-overlapping exon vs isoform matrix
+  candiIsoform = isoAll[[clust]]
+  iso_names = colnames(candiIsoform)
+  # Extract gene information for each cluster
+  gene = nTE_other[which(nTE_other$clustID == clust),1]
+  
+  if(length(gene) > 1){
+    cat("clust with too many genes: ", clust, "\n")
+  }
+  
+  # Total isoforms
+  iso_total = ncol(candiIsoform)
+  
+  sets1 = as.character(NULL)
+  
+  for(j in 1:iso_total){
+    # Identify exons that appear in isoform j
+    subset_exons = as.character(which(candiIsoform[,j] == 1))
+    num_exons = length(subset_exons)
+  
+    single_sets = str_c(clust, "|", gene, "|", subset_exons, ";")
+  
+    sets1 = union(sets1, single_sets)
+  
+  }
+  
+  exon_sets_other[[clust]] = sets1
+  
+}
+
+# Examine output
+head(exon_sets_other$chr1_2, 10)
+tail(exon_sets_other$chr1_2, 10)
+length(exon_sets_other$chr1_2)
+
+other_geneInfo = list(nTE_other = nTE_other, exon_sets_other = exon_sets_other)
+
+save(other_geneInfo, file = "Human_Materials/Homo_sapiens.GRCh37.66.other.geneInfo.RData")
+
+```
+
+
+# Created Files Necessary for Effective Length Calculations
+
+The calculation of effective lengths requires a list of exon sets for consideration (realistic counts not required), a distribution of the fragment lengths (the lengths of fragments and frequency of these lengths), and various other information including exons making up isoforms for genes and exon lengths. 
+
+The list of exon sets and the fragment length distribution must be created in this document (see following subsections). The remaining materials are already available in the "Human_Materials" folder (the BED file and the knownIsoforms object).
+
+## "Mock" count .txt file
+
+Using the exon sets created in section "Determining Exon Set Combinations" for the 1,000 genes of interest, create a mock count data .txt file in the same format as count files created by countReads() isoform package function. Only the exon sets are important for this step, so each exon set is given an arbitrary non-zero count.
+
+```{r, eval=FALSE}
+exon_vec = as.character(NULL)
+for(clust in names(exon_sets)){
+  exon_vec = c(exon_vec, exon_sets[[clust]]$sets)
+}
+
+head(exon_vec, 20)
+
+# Sample random counts for each exon set - place-holder counts only, not official simulated counts
+# cts = sample(2:8, size = length(exon_vec), replace = T)
+
+# Give each exon set an arbitrary count value
+cts = rep(1, times = length(exon_vec))
+
+mock_counts = data.frame(cts, exon_vec)
+
+```
+
+```{r, eval=FALSE}
+write.table(mock_counts, file = "Human_Materials/mock_counts.txt", col.names = F, row.names = F)
+```
+
+
+Examine mock counts output
+
+```{r}
+cts_fake = read.table("Human_Materials/mock_counts.txt", as.is = T)
+
+head(cts_fake, 20)
+```
+
+## Simulate "Mock" Fragment Length Distribution
+
+Assumption: Can use the same effective length design matrices calculated here for all simulated data.
+
+For this mock example, assume total read counts are 20 million, and the distribution of lengths is normally distributed with mean 300 and sd 50. (Total number of 20 million isn't of much relevance, just need enough samples to get a good idea of the fragment length distribution, the mean and sd of which will be consistent across simulated samples).
+
+We will assume that the simulated counts are based on paired-end reads with read length of 75. Therefore, the minimum read length should be 150. We will also consider the maximum read length to be no larger than 600, which is reasonable given the specified length distribution.
+
+```{r, eval=FALSE}
+
+library(Rcpp)
+library(RcppArmadillo)
+sourceCpp("geneModel_code/fragLens_dist.cpp")
+
+fragLens_out = function(total_reads = 2*10^7, mean = 300, SD = 50, lenMin = 150, lenMax = 600,
+                        out_file){
+  # fragLens_dist() in geneModel_code/fragLens_dist.cpp file
+  freq_dist = fragLens_dist(total_reads, mean, SD, lenMin, lenMax)
+  freq_dist = freq_dist[which(freq_dist[,1] > 0),]
+  write.table(freq_dist, file = out_file, col.names = F, row.names = F)
+}
+
+set.seed(3860)
+fragLens_out(total_reads = 2*10^7, mean = 300, SD = 50, lenMin = 150, lenMax = 600,
+             out_file = "Human_Materials/mock_fraglens.txt")
+
+```
+
+View fraglens.txt output
+
+```{r}
+fl_dist = read.table("Human_Materials/mock_fraglens.txt", as.is = T)
+fl_dist
+sum(fl_dist[,1])
+
+summary(fl_dist)
+sum(fl_dist[,1]*fl_dist[,2]) / sum(fl_dist[,1])
+fl_dist[1,1] / sum(fl_dist[,1])
+```
+
+
+# Calculate Effective Length Design Matrices
+
+In this section, the effective length design matrix (used for later simulations) of the 1,000 'genes of interest' is calculated. The rows of this ultimate design matrix correspond to exon sets, and the columns of the matrix correspond to the possible isoforms for the gene.
+
+During the procedure to calculate this design matrix, exon sets (rows of the X matrix) are eliminated from consideration if the entire row gives a 0 effective length for all isoforms. After this exon set elimination, if there are entries where the effective length is a fraction between 0 adn 1, then the effective length for this entry is rounded up to 1.
+
+The output is a list with a list element for each cluster. For each cluster, the effective length design matrix (X), the names of the exon sets that have an effective length of 1 for at least one isoform (ExonSetLabels), the knownIsoforms information for the cluster (candiIsoform, see knownIsoforms description in `IsoDeconvMM()` function documentation in the `IsoDeconvMM` package), and information about exon lengths (info) are provided.
+
+Source code files used to calculate effective length design matrix X:
+
+```{r}
+code_files = c("IsoDeconv_Step1.R","dev_compiled_geneMod2.R","geneModel_X.R")
+for(f in code_files){
+  source(sprintf("geneModel_code/%s",f))
+}
+```
+
+Run code:
+
+```{r, eval=FALSE}
+
+prefix = getwd()
+
+X_info = IsoDeconv_Step1(directory = sprintf("%s/Human_Materials", prefix), 
+                         mix_files = "mock_counts.txt", 
+                         pure_ref_files = matrix(c("mock_counts.txt","fake"), nrow = 1), 
+                         fraglens_files = "mock_fraglens.txt",
+                         bedFile = "Homo_sapiens.GRCh37.66.nonoverlap.exon.bed", 
+                         knownIsoforms= "Homo_sapiens.GRCh37.66.nonoverlap.exon.knownIsoforms.RData",
+                         discrim_genes = nTE_filtered$geneId,
+                         readLen = 75, lmax = 600, eLenMin = 0)
+
+
+```
+
+Save results
+
+```{r, eval=FALSE}
+save(X_info, file = "Human_Materials/Effective Length Design Matrices.RData")
+```
+
+Examination of output:
+
+```{r}
+# Load the effective length info
+load(file = "Human_Materials/Effective Length Design Matrices.RData")
+# Number of clusters selected
+length(X_info)
+# clusters considered
+head(names(X_info))
+# Names of output per cluster
+names(X_info$chr1_100)
+# Examination of output for a sample cluster
+head(X_info$chr1_100$info)
+head(X_info$chr1_100$candiIsoform)
+head(X_info$chr1_100$X)
+head(X_info$chr1_100$ExonSetLabels)
+```
+
+The End

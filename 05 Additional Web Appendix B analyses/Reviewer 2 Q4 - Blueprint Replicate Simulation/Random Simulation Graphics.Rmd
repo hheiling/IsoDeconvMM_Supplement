@@ -1,0 +1,135 @@
+---
+title: "Random Simulation Graphics"
+author: "Hillary Heiling"
+date: "August 4, 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Graphics for 'Random Simulation' results
+
+```{r}
+library(knitr)
+library(stringr)
+library(ggplot2)
+library(reshape2)
+library(ICSNP)
+# Source relevant code
+source("~/GitHub/deconvolution/Blueprint_Simulation/Graphics11/graphics_code.R")
+```
+
+Read in probability results
+
+```{r}
+prob_files = list.files(path = "~/Longleaf/Blueprint/RandSim_Results/",
+                        full.names = T)
+probs_lst = list()
+for(i in 1:length(prob_files)){
+  # load probs list object
+  load(prob_files[i])
+  probs_lst[[i]] = probs
+}
+
+# length(probs_lst)
+
+mix_names = names(probs)
+clust_names = rownames(probs[[1]])
+sim_labs = c(str_c("Sim0",1:9), "Sim10")
+
+```
+
+Create data.frame for graphics
+
+```{r}
+probs_true = list.files("~/Longleaf/Blueprint/Blueprint_Materials/RandSim_Probs/",
+                       full.names = T)
+for(i in 1:10){
+  # load p_combos matrix object (true probabilities)
+  load(probs_true[i])
+  df_a = p_dfA(pList = probs_lst[[i]], mix_labels = mix_names, clust_names = clust_names,
+              p_combos = p_combos, out_remove = F)
+  df_a$Sim = sim_labs[i]
+  
+  if(i == 1){
+    df = df_a
+  }else{
+    df = rbind(df, df_a)
+  }
+}
+```
+
+Scatterplots - all cell types
+
+```{r}
+ggplot(data = df) + geom_point(mapping = aes(x = True_p, y = p_est), shape = 1) + 
+  facet_grid(Sim ~ CellType) + geom_abline(slope = 1, intercept = 0) +
+  xlab("True Proportion") + ylab("Proportion Estimate") +
+  coord_fixed(ratio = 1, xlim = c(0, 1), ylim = c(0,1)) +
+  theme_grey(base_size = 18) +
+  theme(axis.text.x = element_text(angle = 270))
+ggsave(file="RandSim Graphics/Scatterplot.jpeg",
+       width = 7, height = 12, units = "in")
+```
+
+Correlations and SSE bar plots - CT1 only
+
+Correlation of CT1 from paper (100 cluster case): 0.889
+SSE of CT1 from paper (100 cluster case): 1.125
+
+```{r}
+CT = c("CT1","CT2","CT3")
+
+x = corr_SSE(df_list = list(df[1:300,], df[301:600,], df[601:900,], 
+                            df[901:1200,], df[1201:1500,], df[1501:1800,],
+                            df[1801:2100,], df[2101:2400,], df[2401:2700,],
+                            df[2701:3000,]), 
+             col_labels = sim_labs, 
+             CT = CT)
+
+df_corr =  bar_df(table = x$corr, 
+                        col_labels = sim_labs, 
+                        var_name = "Simulation", value_name = "Correlation")
+df_corr = df_corr[which(df_corr$CellType == "CT1"),]
+
+df_SSE =  bar_df(table = x$SSE, 
+                        col_labels = sim_labs, 
+                        var_name = "Simulation", value_name = "SSE")
+df_SSE = df_SSE[which(df_SSE$CellType == "CT1"),]
+
+# ggplot(data = df_corr_ClustComp, aes(x = CellType, y = Correlation, fill = FitType)) +
+#   facet_grid(. ~ Clusters) +
+#   geom_bar(stat = "identity", position = position_dodge()) +
+#   scale_fill_manual(values = c("black","gray50")) +
+#   coord_cartesian(ylim = c(0,1)) +
+#   theme_grey(base_size = 18) +
+#   theme(legend.position = "bottom") + labs(fill = "Method")
+# ggsave(filename = "Graphics11/Corr_MethodCompare_10InitPts.eps",
+#        width = 7, height = 4, units = "in")
+
+ggplot(data = df_corr, aes(x = Simulation, y = Correlation)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  coord_cartesian(ylim = c(0,1)) +
+  geom_hline(yintercept = 0.889, color = "red") +
+  theme_grey(base_size = 18) +
+  ggtitle("Correlations of Cell Type 1") +
+  theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(angle = 315))
+ggsave(file="RandSim Graphics/Correlation.jpeg",
+       width = 7, height = 5, units = "in")
+  
+```
+
+```{r}
+ggplot(data = df_SSE, aes(x = Simulation, y = SSE)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_hline(yintercept = 1.125, color = "red") +
+  theme_grey(base_size = 18) +
+  ggtitle("SSE of Cell Type 1") +
+  theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(angle = 315))
+ggsave(file="RandSim Graphics/SSE.jpeg",
+       width = 7, height = 5, units = "in")
+```
+
+The End

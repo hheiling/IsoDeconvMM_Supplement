@@ -1,0 +1,404 @@
+---
+title: "Blueprint_IsoDetect_Results"
+author: "Hillary Heiling"
+date: "July 18, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Document Overview
+
+The document walks through how clusters will be selected for the Blueprint *in silico* data analyses. All of the decisions will be based of the `isoDetector` function results in the "Longleaf/Blueprint/isoDetector_out2" folder. 
+
+Descriptions of the procedures used for cluster selection are included alongside the code in the section below.
+
+
+## Parallel Filtering Based on Fold Changes and Wilcoxon Rank Sum Tests
+
+Chromosomes of interest: 1, 2, 3, and 4
+
+Other cluster filtering: restrict to genes with number isoforms between 3 and 20
+
+```{r}
+library(stringr)
+CT = c("EGAD00001002671","EGAD00001002674","EGAD00001002675")
+
+# load nTE object
+load("Materials/gencode.v15.nTE.RData")
+
+nTE_A = nTE[c(which(str_detect(nTE$clustID, "chr1_")),
+              which(str_detect(nTE$clustID, "chr2_")),
+              which(str_detect(nTE$clustID, "chr3_")),
+              which(str_detect(nTE$clustID, "chr4_"))),]
+
+Routs = list()
+for(ct in 1:length(CT)){
+  Routs[[ct]] = list.files(path = str_c("~/Longleaf/Blueprint/isoDetector_out2", CT[ct], sep="/"), 
+                           pattern = ".RData", full.names = T)
+  # print(basename(Routs[[ct]]))
+}
+
+Routs_list = list()
+for(ct in 1:length(CT)){
+  for(i in 1:length(Routs[[ct]])){
+    # Load geneMod objects from isoDetector output
+    load(Routs[[ct]][i])
+    # Restrict to chromosomes of interest
+    idx_save = which(names(geneMod) %in% unique(nTE_A$clustID))
+    geneMod_restrict = geneMod[idx_save]
+    # Find which clusters have appropriate number of isoforms
+    keep_idx = numeric(length(geneMod_restrict))
+    for(k in 1:length(geneMod_restrict)){
+      if(ncol(geneMod_restrict[[k]]$X) >= 3 & ncol(geneMod_restrict[[k]]$X) <= 20) keep_idx[k] = 1
+    }
+    geneMod_restrict2 = geneMod_restrict[which(keep_idx == 1)]
+    Routs_list[[i+(ct-1)*length(Routs[[ct]])]] = geneMod_restrict2
+  }
+}
+
+```
+
+Filter out clusters that are not present in all samples
+
+```{r}
+num_clusters = numeric(length(Routs_list))
+for(i in 1:length(Routs_list)){
+  num_clusters[i] = length(Routs_list[[i]])
+}
+
+summary(num_clusters)
+
+clust_interest = names(Routs_list[[1]])
+for(i in 2:length(Routs_list)){
+  geneMod = Routs_list[[i]]
+  clust_interest = intersect(clust_interest, names(geneMod))
+}
+
+length(clust_interest)
+```
+
+Calculate abundance matrix (rows correspond to pure reference samples, columns correspond to isoforms within a cluster, entries of the matrix equal the abundance values)
+
+```{r}
+
+abund = list()
+for(clust in clust_interest){
+  
+  R = length(Routs_list)
+  
+  I_vec = numeric(R)
+  for(r in 1:R){
+    I_vec[r] = ncol(Routs_list[[r]][[clust]]$X)
+  }
+  
+  if(length(unique(I_vec)) == 1){
+    I = I_vec[1]
+    mat = matrix(0, nrow = length(Routs_list), ncol = I)
+  
+    for(r in 1:R){
+      I_r = ncol(Routs_list[[r]][[clust]]$X)
+      if(I_r != I){
+        cat("Issue with sample ", r, " and clust ", clust, "\n")
+        mat[r,] = NA
+      }else{
+        w2kp = Routs_list[[r]][[clust]]$w2kp
+        ab = Routs_list[[r]][[clust]]$abundance
+        mat[r,w2kp] = ab
+      }
+    }
+    
+    abund[[clust]] = mat
+    
+  }
+  
+}
+
+length(abund)
+```
+
+For each cell type (wlog, CT1):
+
+For each cluster:
+
+* Find isoforms within the cluster that have a non-zero abundance in 9 of the 10 samples belonging to CT1
+
+* For each isoform that meets the above criteria, calculated the average abundance of the isoform in CT1 and the average abundance of the isoform in the collective samples of CT2 and CT3. Using these average abundance values, calculate the fold change comparing CT1 to the other two cell types (collectively). 
+
+* Isoforms that do not meet the abundance criteria will have recorded fold change values of `NA`.
+
+Repeat the above for cell types 2 and 3. 
+
+
+```{r}
+fold_changes = list()
+
+for(clust in names(abund)){
+  
+  mat = abund[[clust]]
+  
+  # if(ncol(mat) < 3 | ncol(mat) > 15) stop("Incorrect number isoforms")
+  if(ncol(mat) < 3 | ncol(mat) > 20) stop("Incorrect number isoforms")
+  
+  fc_mat = matrix(NA, nrow = 3, ncol = ncol(mat))
+  colnames(fc_mat) = 1:ncol(fc_mat)
+  rownames(fc_mat) = c("1v23","2v13","3v12")
+  
+  for(ct in 1:3){
+    
+    if(ct == 1){
+      rows0 = 1:10
+      rows1 = 11:30
+    }else if(ct == 2){
+      rows0 = 11:20
+      rows1 = c(1:10,21:30)
+    }else if(ct ==3){
+      rows0 = 21:30
+      rows1 = 1:20
+    } # End if-else ct
+    
+    indic = colSums(ifelse(mat[rows0,] > 0, 1, 0))
+    cols2use = which(indic >= 9)
+    
+    if(length(cols2use) < 1){
+      next
+    }
+    
+    for(j in 1:length(cols2use)){
+      fc_mat[ct,cols2use[j]] = mean(mat[rows0,cols2use[j]]) / 
+        mean(mat[rows1,cols2use[j]])
+    } # End j for loop
+    
+  } # End ct for loop
+  
+  fold_changes[[clust]] = fc_mat
+  
+} # End clust for loop
+
+length(fold_changes)
+
+# Sample fold_changes
+fold_changes$chr1_141
+```
+
+
+For each cell type (wlog, CT1):
+
+For each cluster:
+
+* Find isoforms within the cluster that have a non-zero abundance in 9 of the 10 samples belonging to CT1
+
+* For each isoform that meets the above abundance criteria, run the Wilcoxon rank sum test comparing the abundance of the isoform in CT1 compared to the other two cell types collectively. The test should be one-sided: Test the hypothesis that the abundance in CT1 is greater than the abundance in the other two cell types combined. Record the p-values.  
+
+* Isoforms that do not meet the abundance criteria will have Wilcoxon p-values recorded as `NA`.
+
+Repeat the above for cell types 2 and 3. 
+
+```{r}
+
+wilcox_results = list()
+
+for(clust in names(fold_changes)){
+  
+  mat = abund[[clust]]
+  
+  p_mat = matrix(NA, nrow = 3, ncol = ncol(mat))
+  colnames(p_mat) = 1:ncol(p_mat)
+  rownames(p_mat) = c("1v23","2v13","3v12")
+  
+  for(ct in 1:3){
+    
+    if(ct == 1){
+      rows0 = 1:10
+      rows1 = 11:30
+    }else if(ct == 2){
+      rows0 = 11:20
+      rows1 = c(1:10,21:30)
+    }else if(ct ==3){
+      rows0 = 21:30
+      rows1 = 1:20
+    } # End if-else ct
+    
+    indic = colSums(ifelse(mat[rows0,] > 0, 1, 0))
+    cols2use = which(indic >= 9)
+    
+    if(length(cols2use) < 1){
+      next
+    }
+    
+    for(j in 1:length(cols2use)){
+      test = wilcox.test(x = mat[rows0,cols2use[j]], y = mat[rows1,cols2use[j]],
+                          alternative = "greater", paired = F, exact = F)
+      p_mat[ct,cols2use[j]] = test$p.value
+      
+    } # End j for loop
+    
+  } # End ct for loop
+  
+  wilcox_results[[clust]] = p_mat
+  
+} # End clust for loop
+
+length(wilcox_results)
+
+# Sample wilcox_results
+wilcox_results$chr1_141
+
+```
+
+Using the fold change values and the Wilcoxon rank sum tests results, create a Volcano plot.
+
+* For cell type 1, create a single vector with all of the fold change values for all isoforms. Remove any `NA` values (excludes isoforms with inadequate abundance values in CT1).
+
+* For cell type 1, create a single vector with all of the Wilcoxon rank sum p-values for all isoforms, removing the `NA` values indicating the isoform has insufficient abundance values. 
+
+* Provide names that incorporate both the cluster name and the isoform. Provide another vector that specifies which cluster the isoform was from.
+
+* Concatenate the above information into a matrix.
+
+* Repeat for cell types 2 and 3
+
+* For each cell type individually, plot log2(fold change) on the x axis and -log10(p-values) on the y axis. Identify isoforms in the upper-right corner of the plot.
+
+Based on exploration, if fold change value is infinite, sufficient to re-code the fold change value to 10^5 (needs to be at least greater than 2000)
+
+
+```{r}
+library(stringr)
+
+volcano_info = list()
+
+for(ct in 1:3){
+  
+  v_mat = NULL
+  
+  for(cl in 1:length(fold_changes)){
+    
+    clust = names(fold_changes)[cl]
+    fc_vec0 = fold_changes[[cl]][ct,]
+    fc_vec = ifelse(is.infinite(fc_vec0), 10^5, fc_vec0)
+    wil_vec = wilcox_results[[cl]][ct,]
+    iso_names = str_c(clust, 1:length(fc_vec), sep = ":")
+    v_mat0 = data.frame(fc = fc_vec, wilcox = wil_vec, isoformID = iso_names, 
+                        clustID = rep(clust, length(fc_vec)))
+    
+    if(cl == 1){
+      v_mat = v_mat0[-which(is.na(fc_vec)),]
+    }else{
+      v_mat = rbind(v_mat, v_mat0[-which(is.na(fc_vec)),])
+    }
+    
+  }
+  
+  volcano_info[[ct]] = v_mat
+  
+}
+
+```
+
+
+```{r}
+for(ct in 1:3){
+  print(nrow(volcano_info[[ct]]))
+}
+```
+
+```{r}
+head(volcano_info[[1]])
+head(round(volcano_info[[1]][,1:2], 5))
+```
+
+```{r}
+for(ct in 1:3){
+  mat = volcano_info[[ct]]
+  plot(x = log2(mat$fc), y = -log10(mat$wilcox), pch = 20,
+       xlab = "log2(fold_change)", ylab = "-log10(p-value)", 
+       main = sprintf("Cell Type %i", ct))
+}
+```
+
+Using the p-value Bonferroni cut-off for multiple testing corrections, $0.05 / N_{ct}$ where $N_{ct}$ equals the number of isoforms tested for cell type $ct$, chose isoforms with the largest fold change values for each cell type.
+
+```{r}
+best_results = list()
+clust_options = character(0)
+
+n = 60
+for(ct in 1:3){
+  mat = volcano_info[[ct]]
+  mat2 = mat[which(mat$wilcox < 0.05/nrow(mat)),]
+  mat3 = mat2[order(mat2$fc, decreasing = T),]
+  clust_options = union(clust_options, unique(mat3$clustID[1:n]))
+  best_results[[ct]] = mat3[1:n,]
+}
+
+length(clust_options)
+```
+
+Intersection between these clusters and previously chosen clusters from Sequential approach.
+
+```{r}
+length(intersect(clust_options, unique(nTE_discrimD$clustID)))
+```
+
+Examine results a little closer.
+
+```{r}
+for(i in 1:length(best_results)){
+  mat = best_results[[i]]
+  cat("num isoforms: ", nrow(mat), "; num clusters: ", length(unique(mat$clustID)), "\n")
+}
+
+for(i in 1:length(best_results)){
+  print(head(best_results[[i]],10))
+  print(tail(best_results[[i]],10))
+}
+
+I = numeric(length(clust_options))
+for(clust in clust_options){
+  I[which(clust_options == clust)] = ncol(abund[[clust]])
+}
+table(I)
+```
+
+Save results
+
+```{r}
+nTE_discrimE = nTE[which(nTE$clustID %in% clust_options),]
+save(nTE_discrimE, file = "Materials/Cluster_Selection_Parallel/gencode.v15.nTE.discrimE.RData")
+
+save(best_results, file = "Materials/Cluster_Selection_Parallel/Best_Isoforms_Clusters.RData")
+```
+
+Examine dispersion in clusters of interest
+
+```{r}
+
+phi_mat = matrix(0, nrow = length(clust_options), ncol = length(Routs_list))
+rownames(phi_mat) = clust_options
+
+for(clust in clust_options){
+  
+  R = length(Routs_list)
+  i = which(clust_options == clust)
+  
+  for(r in 1:R){
+    phi_mat[i,r] = Routs_list[[r]][[clust]]$phi
+  }
+  
+}
+
+phi_mat2 = ifelse(phi_mat == 0, NA, phi_mat)
+
+phi_means = apply(phi_mat2, 1, FUN = function(x) mean(x, na.rm = T))
+phi_medians = apply(phi_mat2, 1, FUN = function(x) median(x, na.rm = T))
+
+summary(phi_means)
+summary(phi_medians)
+```
+
+
+
+The End

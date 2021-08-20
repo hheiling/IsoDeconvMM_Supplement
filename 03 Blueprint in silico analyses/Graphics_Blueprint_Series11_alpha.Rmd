@@ -1,0 +1,1210 @@
+---
+title: "Graphic_Blueprint_Series11"
+author: "Hillary Heiling"
+date: "June 16, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F)
+```
+
+# Overview
+
+In this document, we examine the Blueprint fit series 11 (11A, 11B, 11C, and 11A_10InitPts). In this series, we select clusters for use in the Blueprint analysis based on the Parallel Selection prodecure described in "Blueprint_IsoDetect_Results.Rmd". 
+
+Load libraries
+
+```{r, echo=TRUE}
+library(stringr)
+library(ggplot2)
+library(reshape2)
+library(ICSNP)
+library(knitr)
+```
+
+Load materials
+
+```{r, echo=TRUE}
+# Load true probabilities p_combos matrix (used to create the mixture files)
+load("Materials/Blueprint_ProbCombos.RData")
+
+# nTE_discrimE (includes discriminatory clusters used for analysis)
+load("Materials/Cluster_Selection_Parallel/gencode.v15.nTE.discrimE.RData")
+
+# best_results list object
+load("Materials/Cluster_Selection_Parallel/Best_Isoforms_Clusters.RData")
+
+# fc_keep matrix
+load("Materials/Cluster_Selection_Sequential/Cluster_Fold_Changes.RData")
+
+# Source relevant code
+source("Graphics11/graphics_code.R")
+```
+
+
+
+```{r}
+alpha_limit = 500
+```
+
+
+```{r}
+# 11A results
+## Truth as initial point, 5 reference samples per cell type
+
+files = list.files(path = "C:/Users/hheiling/Documents/Longleaf/Blueprint/Simulation_Results/Fit11A/Summary_Probs/", full.names = T)
+
+# Note: There are 5 results files for each mixture file (in order to reduce computation time)
+
+probs11A = list()
+mix_names = unique(str_sub(basename(files), start = 1, end = 7))
+
+for(i in 1:length(mix_names)){
+  files_i = files[which(str_detect(files, mix_names[i]))]
+  if(length(files_i) != 3) print(basename(files_i))
+  for(j in 1:length(files_i)){
+    # Load SimSummary
+    load(files_i[j])
+    if(j == 1){
+      p_mat = SimSummary[[1]]$p_mat
+    }else{
+      p_mat = rbind(p_mat, SimSummary[[1]]$p_mat)
+    }
+    
+  }
+  
+  probs11A[[i]] = p_mat 
+  
+}
+
+names(probs11A) = mix_names
+
+```
+
+```{r}
+# Read in saved parameter data
+
+files = list.files(path = "~/Longleaf/Blueprint/Simulation_Results/Fit11A/Results_Abbrev/",
+                   pattern = "Mix_001_", full.names = T)
+
+alpha_lst = list()
+clust_names_all = character(0)
+for(i in 1:length(files)){
+  # load SimResults object
+  load(files[i])
+  params = SimResults[[1]]
+  clust_names_all = c(clust_names_all, names(params))
+  tmp = list()
+  for(j in 1:length(params)){
+    tmp[[j]] = params[[j]]$alpha.est
+  }
+  
+  alpha_lst = c(alpha_lst, tmp)
+}
+
+names(alpha_lst) = clust_names_all
+
+
+# Only keep clusters where alpha values are 'reasonable'
+keep = numeric(length(alpha_lst))
+alpha_keep = list()
+for(i in 1:length(alpha_lst)){
+  a_mat = alpha_lst[[i]]
+  
+  if(any(is.na(a_mat))){
+    keep[i] = 0
+    next
+  }
+  
+  issue = ifelse(a_mat > alpha_limit, 1, 0)
+  if(sum(issue) > 1){
+    keep[i] = 0
+  }else{
+    keep[i] = 1
+  }
+}
+
+sum(keep)
+keep_idx = which(keep == 1)
+alpha_keep = alpha_lst[keep_idx]
+
+alpha_keep11A = alpha_keep
+
+# Clusters for 'random selection':
+set.seed(2020)
+clusts2use = sample(names(alpha_keep11A), size = 100, replace = F)
+
+clusts_11A = clusts2use
+
+# print(alpha_keep[[1]])
+```
+
+Since over 100 clusters satisfy the criteria to (a) not have any `NA` values in the isoform Dirichlet alpha values and (b) not have divergent alpha values, we aim to pick 100 of the remaining clusters.
+
+Options: Random selection of clusters, or find the 'best' clusters. 
+
+In order to pick the best clusters, we will use the `best_results` list of matrices created in the "Blueprint_IsoDetect_Results.Rmd" document. (See illustration of `best_results` below). To determine the 'best' clusters of the remaining clusters, we will first remove clusters from this `best_results` object that have been filtered out due to their Dirichlet alpha values. Then, we will specify a number $n$ and select the isoforms with the $n$ largest fold change values between cell type $j$ and the other two collective cell types for $j=1,2,3$. The clustesr associated with the isoforms of interest will be identified, and $n$ will be adjusted such that the final cluster number is 100 (or later in the document, such that the final cluster number is 50 or 25).
+
+```{r, echo=T}
+for(i in 1:3){
+  print(head(best_results[[i]], 10))
+}
+```
+
+
+```{r}
+# Create a reduced version of the best_results object so that it only inclues the results 
+# from the 122 clusters of interest
+
+best_results_orig = best_results
+
+best_results_new = list()
+for(i in 1:3){
+  mat = best_results_orig[[i]]
+  mat2 = mat[which(mat[,"clustID"] %in% names(alpha_keep11A)),]
+  best_results_new[[i]] = mat2
+}
+
+```
+
+
+```{r}
+set.seed(2020)
+
+num = 47
+CT1_best = unique(best_results_new[[1]][1:num,"clustID"])
+CT2_best = unique(best_results_new[[2]][1:num,"clustID"])
+CT3_best = unique(best_results_new[[3]][1:num,"clustID"])
+
+clust_fc = union(CT1_best, union(CT2_best, CT3_best))
+# length(clust_fc)
+
+clusts_11A_best = clust_fc
+
+save(clusts_11A_best, file = "~/Longleaf/Blueprint/Blueprint_Materials/Best Clusters Paper 11A.RData")
+
+```
+
+
+```{r, eval=FALSE}
+# Goal: Check that the isoform Dirichlet alpha parameters are the same for all mixture files.
+# Read in saved parameter data
+
+# files = list.files(path = "~/Longleaf/Blueprint/Simulation_Results/Fit11A/Results_Abbrev/",
+#                    pattern = "Mix_002_", full.names = T)
+# 
+# alpha_lst = list()
+# clust_names_all = character(0)
+# for(i in 1:length(files)){
+#   # load SimResults object
+#   load(files[i])
+#   params = SimResults[[1]]
+#   clust_names_all = c(clust_names_all, names(params))
+#   tmp = list()
+#   for(j in 1:length(params)){
+#     tmp[[j]] = params[[j]]$alpha.est
+#   }
+#   
+#   alpha_lst = c(alpha_lst, tmp)
+# }
+# 
+# names(alpha_lst) = clust_names_all
+# 
+# 
+# # Only keep clusters where alpha values are 'reasonable'
+# keep = numeric(length(alpha_lst))
+# for(i in 1:length(alpha_lst)){
+#   a_mat = alpha_lst[[i]]
+#   
+#   if(any(is.na(a_mat))){
+#     keep[i] = 0
+#     next
+#   }
+#   
+#   issue = ifelse(a_mat > alpha_limit, 1, 0)
+#   if(sum(issue) > 1){
+#     keep[i] = 0
+#   }else{
+#     keep[i] = 1
+#   }
+# }
+# 
+# sum(keep)
+# keep_idx = which(keep == 1)
+# alpha_keep2 = alpha_lst[keep_idx]
+# 
+# # clusts_11A = clusts2use
+# 
+# length(intersect(names(alpha_keep), names(alpha_keep2)))
+# print(alpha_keep2[[1]])
+```
+
+
+# Comparison of Random Clusters vs 'Best' Clusters vs 'Best' Clusters after Filtering for 11A Results
+
+After experimenting with some additional cluster filtering optoins in "Outlier Removal Experimentation 11A.Rmd", discovered that the following filtering procedure could improve the results for 100 clusters:
+
+After pre-filtering the clusters based on the isoform Dirichlet alpha values (as has already been done), filter the remaining 122 clusters using the 'Outlier Removal 3' method described below:
+
+Outlier Removal 3: Let X = cbind(x_1,...,x_q) such that x_i is a vector corresponding to each gene cluster (of length k (number cell types) * n (number mixture samples). Calculate a distance matrix D based on (1-(cor(X)+1)/2). Based on D, conduct heirarchical clustering using `hclust` function, then run `cutree` function on the `hclust` result. During the `cutree` step, set k=2 in `cutree` and select the largest cluster.
+
+If more than 100 clusters remain after this filtering step, select the 'best' clusters based on the `best_results` object.
+
+```{r}
+# Best cluster selection, no additional filtering
+
+set.seed(2020)
+
+num = 47
+CT1_best = unique(best_results_new[[1]][1:num,"clustID"])
+CT2_best = unique(best_results_new[[2]][1:num,"clustID"])
+CT3_best = unique(best_results_new[[3]][1:num,"clustID"])
+
+clust_fc = union(CT1_best, union(CT2_best, CT3_best))
+# length(clust_fc)
+
+clusts_11A_best = clust_fc
+
+num = 21
+CT1_best = unique(best_results_new[[1]][1:num,"clustID"])
+CT2_best = unique(best_results_new[[2]][1:num,"clustID"])
+CT3_best = unique(best_results_new[[3]][1:num,"clustID"])
+
+clust_fc = union(CT1_best, union(CT2_best, CT3_best))
+# length(clust_fc)
+
+clust_names_50_best = sample(clust_fc, 50, replace = F)
+
+num = 10
+CT1_best = unique(best_results_new[[1]][1:num,"clustID"])
+CT2_best = unique(best_results_new[[2]][1:num,"clustID"])
+CT3_best = unique(best_results_new[[3]][1:num,"clustID"])
+
+clust_fc = union(CT1_best, union(CT2_best, CT3_best))
+# length(clust_fc)
+
+clust_names_25_best = sample(clust_fc, 25, replace = F)
+
+```
+
+```{r}
+
+A100 = p_dfA(pList = probs11A, mix_labels = mix_names, clust_names = clusts_11A_best,
+                 p_combos = p_combos, out_remove = F)
+A100$ClustNum = 100
+
+A50 = p_dfA(pList = probs11A, mix_labels = mix_names, clust_names = clust_names_50_best,
+                     p_combos = p_combos, out_remove = F)
+A50$ClustNum = 50
+
+A25 = p_dfA(pList = probs11A, mix_labels = mix_names, clust_names = clust_names_25_best,
+                     p_combos = p_combos, out_remove = F)
+A25$ClustNum = 25
+
+df_A = rbind(A100, A50, A25)
+
+```
+
+```{r}
+# Random selection of clusters
+set.seed(5129)
+clust_names_50 = sample(clusts_11A, size = 50, replace = F)
+clust_names_25 = sample(clusts_11A, size = 25, replace = F)
+
+B100 = p_dfA(pList = probs11A, mix_labels = mix_names, clust_names = clusts_11A,
+                 p_combos = p_combos, out_remove = F)
+B100$ClustNum = 100
+
+B50 = p_dfA(pList = probs11A, mix_labels = mix_names, clust_names = clust_names_50,
+                     p_combos = p_combos, out_remove = F)
+B50$ClustNum = 50
+
+B25 = p_dfA(pList = probs11A, mix_labels = mix_names, clust_names = clust_names_25,
+                     p_combos = p_combos, out_remove = F)
+B25$ClustNum = 25
+
+df_B = rbind(B100, B50, B25)
+
+```
+
+```{r}
+
+# Best selection of clusters after additional filtering step based on clustering
+
+set.seed(7596)
+
+# Best 100 clusters after filtering 122 clusters using Outlier Removal Method 3 (k)
+clust_names = names(alpha_keep11A)
+# Find (J*n) x q matrix of prob estimates for all samples and cell types for the q genes
+X_full = X_mat(pList = probs11A)
+# Restrict X to only include genes from clusters of interest
+X = X_full[,which(colnames(X_full) %in% clust_names)]
+# Based on correlation distances, remove outliers and output new cluster restrictions
+cat("length of original clust_names: ", length(clust_names), "\n")
+clust_names = outlier_clustering(X = X, cutree_method = "k")
+cat("length of new clust_names after filtering method 3: ", length(clust_names), "\n")
+
+best_results_new = list()
+for(i in 1:3){
+  mat = best_results_orig[[i]]
+  mat2 = mat[which(mat[,"clustID"] %in% clust_names),]
+  best_results_new[[i]] = mat2
+}
+
+# Of the remaining clusters, find best 100 based on best_results
+num = 48
+CT1_best = unique(best_results_new[[1]][1:num,"clustID"])
+CT2_best = unique(best_results_new[[2]][1:num,"clustID"])
+CT3_best = unique(best_results_new[[3]][1:num,"clustID"])
+
+clust_fc = union(CT1_best, union(CT2_best, CT3_best))
+# length(clust_fc)
+
+best_out3_100 = sample(clust_fc, 100, replace = F)
+
+# Of the remaining clusters, find best 50 based on best_results
+num = 21
+CT1_best = unique(best_results_new[[1]][1:num,"clustID"])
+CT2_best = unique(best_results_new[[2]][1:num,"clustID"])
+CT3_best = unique(best_results_new[[3]][1:num,"clustID"])
+
+clust_fc = union(CT1_best, union(CT2_best, CT3_best))
+# length(clust_fc)
+
+best_out3_50 = clust_fc
+
+# Of the remaining clusters, find best 25 based on best_results
+num = 10
+CT1_best = unique(best_results_new[[1]][1:num,"clustID"])
+CT2_best = unique(best_results_new[[2]][1:num,"clustID"])
+CT3_best = unique(best_results_new[[3]][1:num,"clustID"])
+
+clust_fc = union(CT1_best, union(CT2_best, CT3_best))
+# length(clust_fc)
+
+best_out3_25 = clust_fc
+
+
+# Data frames needed for graphics
+C100 = p_dfA(pList = probs11A, mix_labels = mix_names, clust_names = best_out3_100,
+                 p_combos = p_combos, out_remove = F)
+C100$ClustNum = 100
+
+C50 = p_dfA(pList = probs11A, mix_labels = mix_names, clust_names = best_out3_50,
+                     p_combos = p_combos, out_remove = F)
+C50$ClustNum = 50
+
+C25 = p_dfA(pList = probs11A, mix_labels = mix_names, clust_names = best_out3_25,
+                     p_combos = p_combos, out_remove = F)
+C25$ClustNum = 25
+
+df_C = rbind(C100, C50, C25)
+```
+
+
+Correlations and SSE (tables)
+
+Best Clusters with no additional filtering:
+
+```{r}
+CT = c("CT1","CT2","CT3")
+
+x_A = corr_SSE(df_list = list(A100,A50,A25),
+                    col_labels = c("100 Cluster","50 Clusters", "25 Clusters"), CT = CT)
+
+kable(x_A$corr, digits = 3, caption = "Cell Type Correlation Comparison")
+kable(x_A$SSE, digits = 3, caption = "Cell Type SSE Comparison")
+
+
+```
+
+Best Clusters with additional filtering:
+
+```{r}
+x_C = corr_SSE(df_list = list(C100,C50,C25),
+               col_labels = c("100 Cluster","50 Clusters", "25 Clusters"), CT = CT)
+
+kable(x_C$corr, digits = 3, caption = "Cell Type Correlation Comparison")
+kable(x_C$SSE, digits = 3, caption = "Cell Type SSE Comparison")
+```
+
+
+Random Clusters:
+
+```{r}
+x_B = corr_SSE(df_list = list(B100,B50,B25),
+                    col_labels = c("100 Cluster","50 Clusters", "25 Clusters"), CT = CT)
+
+kable(x_B$corr, digits = 3, caption = "Cell Type Correlation Comparison")
+kable(x_B$SSE, digits = 3, caption = "Cell Type SSE Comparison")
+
+```
+
+
+Bar plots:
+
+```{r}
+df_corrA = bar_df(table = x_A$corr, col_labels = c("100 Cluster","50 Clusters", "25 Clusters"),
+                  var_name = "Clusters", value_name = "Correlation")
+df_corrA$Select = "Best Clusters"
+
+df_SSEA = bar_df(table = x_A$SSE, col_labels = c("100 Cluster","50 Clusters", "25 Clusters"),
+                  var_name = "Clusters", value_name = "SSE")
+df_SSEA$Select = "Best Clusters"
+
+df_corrC = bar_df(table = x_C$corr, col_labels = c("100 Cluster","50 Clusters", "25 Clusters"),
+                  var_name = "Clusters", value_name = "Correlation")
+df_corrC$Select = "Best w/ Filtering"
+
+df_SSEC = bar_df(table = x_C$SSE, col_labels = c("100 Cluster","50 Clusters", "25 Clusters"),
+                  var_name = "Clusters", value_name = "SSE")
+df_SSEC$Select = "Best w/ Filtering"
+
+df_corrB = bar_df(table = x_B$corr, col_labels = c("100 Cluster","50 Clusters", "25 Clusters"),
+                  var_name = "Clusters", value_name = "Correlation")
+df_corrB$Select = "Random Clusters"
+
+df_SSEB = bar_df(table = x_B$SSE, col_labels = c("100 Cluster","50 Clusters", "25 Clusters"),
+                  var_name = "Clusters", value_name = "SSE")
+df_SSEB$Select = "Random Clusters"
+
+df_corr_star = rbind(df_corrA, df_corrB, df_corrC)
+df_SSE_star = rbind(df_SSEA, df_SSEB, df_SSEC)
+
+ggplot(data = df_corr_star, aes(x = CellType, y = Correlation, fill = Select)) +
+  facet_grid(. ~ Clusters) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual(values = c("purple","mediumorchid","plum")) +
+  coord_cartesian(ylim = c(0,1)) +
+  theme_grey(base_size = 11) +
+  theme(legend.position = "bottom") + labs(fill = "Simulation")
+
+
+ggplot(data = df_SSE_star, aes(x = CellType, y = SSE, fill = Select)) +
+  facet_grid(. ~ Clusters) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual(values = c("purple","mediumorchid","plum")) +
+  theme_grey(base_size = 11) +
+  theme(legend.position = "bottom") + labs(fill = "Simulation")
+
+```
+
+
+# Comparison of Number Pure Reference Samples in Analysis
+
+Procedure: 
+
+For each set of simulations (using 5, 10, and 20 samples per cell type), first filter the clustesr such that they only include clusters with Dirichlet alpha values that are not divergent and not `NA`. Then, for each set of simulations, find the 'best' 100 clusters based on the `best_results` object. 
+
+In this procedure, the number of clusters is kept consistent at 100, but there is some inconsistency in the actual clusters used. 
+
+Used truth as the initial point
+
+```{r}
+# 11B results
+## Truth as initial point, 5 reference samples per cell type
+
+files = list.files(path = "C:/Users/hheiling/Documents/Longleaf/Blueprint/Simulation_Results/Fit11B/Summary_Probs/", full.names = T)
+
+# Note: There are 5 results files for each mixture file (in order to reduce computation time)
+
+probs11B = list()
+mix_names = unique(str_sub(basename(files), start = 1, end = 7))
+
+for(i in 1:length(mix_names)){
+  files_i = files[which(str_detect(files, mix_names[i]))]
+  if(length(files_i) != 3) print(basename(files_i))
+  for(j in 1:length(files_i)){
+    # Load SimSummary
+    load(files_i[j])
+    if(j == 1){
+      p_mat = SimSummary[[1]]$p_mat
+    }else{
+      p_mat = rbind(p_mat, SimSummary[[1]]$p_mat)
+    }
+    
+  }
+  
+  probs11B[[i]] = p_mat 
+  
+}
+
+names(probs11B) = mix_names
+
+```
+
+```{r}
+# Read in saved parameter data
+
+files = list.files(path = "~/Longleaf/Blueprint/Simulation_Results/Fit11B/Results_Abbrev/",
+                   pattern = "Mix_001_", full.names = T)
+
+alpha_lst = list()
+clust_names_all = character(0)
+for(i in 1:length(files)){
+  # load SimResults object
+  load(files[i])
+  params = SimResults[[1]]
+  clust_names_all = c(clust_names_all, names(params))
+  tmp = list()
+  for(j in 1:length(params)){
+    tmp[[j]] = params[[j]]$alpha.est
+  }
+  
+  alpha_lst = c(alpha_lst, tmp)
+}
+
+names(alpha_lst) = clust_names_all
+
+
+# Only keep clusters where alpha values are 'reasonable'
+keep = numeric(length(alpha_lst))
+alpha_keep = list()
+for(i in 1:length(alpha_lst)){
+  a_mat = alpha_lst[[i]]
+  
+  if(any(is.na(a_mat))){
+    keep[i] = 0
+    next
+  }
+  
+  issue = ifelse(a_mat > alpha_limit, 1, 0)
+  if(sum(issue) > 1){
+    keep[i] = 0
+  }else{
+    keep[i] = 1
+  }
+}
+
+sum(keep)
+keep_idx = which(keep == 1)
+alpha_keep = alpha_lst[keep_idx]
+
+alpha_keep11B = alpha_keep
+
+
+```
+
+Since over 100 clusters satisfy the criteria to (a) not have any `NA` values in the isoform Dirichlet alpha values and (b) not have divergent alpha values, we aim to pick the 'best' clusters. We will use the `best_results` list of matrices created in the "Blueprint_IsoDetect_Results.Rmd" document.
+
+```{r}
+# Create a reduced version of the best_results object so that it only inclues the results 
+# from the 119 clusters of interest
+
+best_results_orig = best_results
+
+best_results_new = list()
+for(i in 1:3){
+  mat = best_results_orig[[i]]
+  mat2 = mat[which(mat[,"clustID"] %in% names(alpha_keep11B)),]
+  best_results_new[[i]] = mat2
+}
+
+```
+
+
+```{r}
+num = 46
+CT1_best = unique(best_results_new[[1]][1:num,"clustID"])
+CT2_best = unique(best_results_new[[2]][1:num,"clustID"])
+CT3_best = unique(best_results_new[[3]][1:num,"clustID"])
+
+clust_fc = union(CT1_best, union(CT2_best, CT3_best))
+length(clust_fc)
+
+clusts_11B_best = clust_fc
+
+```
+
+```{r}
+# 11C results
+## Truth as initial point, 5 reference samples per cell type
+
+files = list.files(path = "C:/Users/hheiling/Documents/Longleaf/Blueprint/Simulation_Results/Fit11C/Summary_Probs/", full.names = T)
+
+# Note: There are 5 results files for each mixture file (in order to reduce computation time)
+
+probs11C = list()
+mix_names = unique(str_sub(basename(files), start = 1, end = 7))
+
+for(i in 1:length(mix_names)){
+  files_i = files[which(str_detect(files, mix_names[i]))]
+  if(length(files_i) != 3) print(basename(files_i))
+  for(j in 1:length(files_i)){
+    # Load SimSummary
+    load(files_i[j])
+    if(j == 1){
+      p_mat = SimSummary[[1]]$p_mat
+    }else{
+      p_mat = rbind(p_mat, SimSummary[[1]]$p_mat)
+    }
+    
+  }
+  
+  probs11C[[i]] = p_mat 
+  
+}
+
+names(probs11C) = mix_names
+
+```
+
+```{r}
+# Read in saved parameter data
+
+files = list.files(path = "~/Longleaf/Blueprint/Simulation_Results/Fit11C/Results_Abbrev/",
+                   pattern = "Mix_001_", full.names = T)
+
+alpha_lst = list()
+clust_names_all = character(0)
+for(i in 1:length(files)){
+  # load SimResults object
+  load(files[i])
+  params = SimResults[[1]]
+  clust_names_all = c(clust_names_all, names(params))
+  tmp = list()
+  for(j in 1:length(params)){
+    tmp[[j]] = params[[j]]$alpha.est
+  }
+  
+  alpha_lst = c(alpha_lst, tmp)
+}
+
+names(alpha_lst) = clust_names_all
+
+
+# Only keep clusters where alpha values are 'reasonable'
+keep = numeric(length(alpha_lst))
+alpha_keep = list()
+for(i in 1:length(alpha_lst)){
+  a_mat = alpha_lst[[i]]
+  
+  if(any(is.na(a_mat))){
+    keep[i] = 0
+    next
+  }
+  
+  issue = ifelse(a_mat > alpha_limit, 1, 0)
+  if(sum(issue) > 1){
+    keep[i] = 0
+  }else{
+    keep[i] = 1
+  }
+}
+
+sum(keep)
+keep_idx = which(keep == 1)
+alpha_keep = alpha_lst[keep_idx]
+
+alpha_keep11C = alpha_keep
+
+
+```
+
+Since over 100 clusters satisfy the criteria to (a) not have any `NA` values in the isoform Dirichlet alpha values and (b) not have divergent alpha values, we aim to pick the 'best' clusters. We will use the `best_results` list of matrices created in the "Blueprint_IsoDetect_Results.Rmd" document.
+
+```{r}
+# Create a reduced version of the best_results object so that it only inclues the results 
+# from the 115 clusters of interest
+
+# best_results_orig = best_results
+
+best_results_new = list()
+for(i in 1:3){
+  mat = best_results_orig[[i]]
+  mat2 = mat[which(mat[,"clustID"] %in% names(alpha_keep11C)),]
+  best_results_new[[i]] = mat2
+}
+
+```
+
+
+```{r}
+num = 47
+CT1_best = unique(best_results_new[[1]][1:num,"clustID"])
+CT2_best = unique(best_results_new[[2]][1:num,"clustID"])
+CT3_best = unique(best_results_new[[3]][1:num,"clustID"])
+
+clust_fc = union(CT1_best, union(CT2_best, CT3_best))
+length(clust_fc)
+
+set.seed(9382)
+clusts_11C_best = sample(clust_fc, 100, replace = F)
+
+```
+
+
+
+Recall: WARN indicators for each cluster proportion estimation:
+
+0 - Optimization Complete
+
+1 - Iteration Limit Reached
+
+4 - Error in Optimization Routine
+
+5 - Optimization not conducted (Error in pure sample fit)
+
+[[Based on exploration in "Graphics_Blueprint_Exploration.Rmd" and "Outlier Removal Experimentation.Rmd", will eliminate the clusters from each simulation that have WARN = 5 issues (have NA values in the Dirichlet $\alpha$ values) and remove clusters that have Dirichlet $\alpha$ values that are unusually high (greater than 500). Will then randomly select 100 of these remaining clusters to use in future analyses if number is greater than 100.]]
+
+
+### Scatterplots
+
+```{r}
+
+df_Sim11A = p_dfA(pList = probs11A, mix_labels = mix_names, clust_names = clusts_11A_best,
+              p_combos = p_combos, out_remove = F)
+df_Sim11A$SampleNum = "5 Samples"
+
+df_Sim11B = p_dfA(pList = probs11B, mix_labels = mix_names, clust_names = clusts_11B_best,
+              p_combos = p_combos, out_remove = F)
+df_Sim11B$SampleNum = "10 Samples"
+
+df_Sim11C = p_dfA(pList = probs11C, mix_labels = mix_names, clust_names = clusts_11C_best,
+              p_combos = p_combos, out_remove = F)
+df_Sim11C$SampleNum = "20 Samples"
+
+df_SampNo = rbind(df_Sim11A,df_Sim11B,df_Sim11C)
+
+df_SampNo$SampleNum = factor(df_SampNo$SampleNum, 
+                               levels = c("5 Samples","10 Samples","20 Samples"))
+
+ggplot(data = df_SampNo) + 
+  geom_point(mapping = aes(x = True_p, y = p_est), shape = 1) + 
+  facet_grid(SampleNum ~ CellType) + geom_abline(slope = 1, intercept = 0) +
+  xlab("True Proportion") + ylab("Proportion Estimate") +
+  coord_fixed(ratio = 1, xlim = c(0,1), ylim = c(0,1)) +
+  theme_grey(base_size = 18) +
+  theme(axis.text.x = element_text(angle = 270))
+ggsave(filename = "Graphics11/Scatter_SampleNum_Stacked.eps",
+       width = 7, height = 7, units = "in")
+
+```
+
+### Correlations and SSE
+
+Correlations and SSE (tables)
+
+```{r}
+CT = c("CT1","CT2","CT3")
+
+x_SampNo = corr_SSE(df_list = list(df_Sim11A, df_Sim11B, df_Sim11C),
+                    col_labels = c("5 Samples","10 Samples","20 Samples"), CT = CT)
+
+kable(x_SampNo$corr, digits = 3, caption = "Cell Type Correlation Comparison")
+kable(x_SampNo$SSE, digits = 3, caption = "Cell Type SSE Comparison")
+
+```
+
+Bar plots:
+
+```{r}
+df_corr_SampNo = bar_df(table = x_SampNo$corr, 
+                        col_labels = c("5 Samples","10 Samples","20 Samples"), 
+                        var_name = "Sample_Number", value_name = "Correlation")
+df_SSE_SampNo = bar_df(table = x_SampNo$SSE, 
+                       col_labels = c("5 Samples","10 Samples","20 Samples"), 
+                       var_name = "Sample_Number", value_name = "SSE")
+
+ggplot(data = df_corr_SampNo, aes(x = CellType, y = Correlation, fill = Sample_Number)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual(values = c("navyblue","dodgerblue3","deepskyblue1")) +
+  coord_cartesian(ylim = c(0,1)) +
+  theme_grey(base_size = 18) +
+  theme(legend.position = "bottom") + labs(fill = "Sample Number")
+ggsave(filename = "Graphics11/Correlations_SampleNum.eps",
+       width = 6, height = 4, units = "in")
+
+ggplot(data = df_SSE_SampNo, aes(x = CellType, y = SSE, fill = Sample_Number)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual(values = c("navyblue","dodgerblue3","deepskyblue1")) +
+  theme_grey(base_size = 18) +
+  theme(legend.position = "bottom") + labs(fill = "Sample Number")
+ggsave(filename = "Graphics11/SSE_SampleNum.eps",
+       width = 6, height = 4, units = "in")
+# lightskyblue instead of deepskyblue?
+```
+
+
+# Comparison of Number Initial Points Specified in Analysis ('Best' Clusters with no additional filtering)
+
+```{r}
+# Data: 10 initial points used in fit algorithm
+
+# Create 'probs' list
+## Each element of list = matrix of probability estimates for each of the discriminatory
+## clusters used in the fit analysis. 
+
+files = list.files(path = "C:/Users/hheiling/Documents/Longleaf/Blueprint/Simulation_Results/Fit11A_10InitPts/Summary_Probs/", full.names = T)
+
+# Note: There are 5 results files for each mixture file (in order to reduce computation time)
+
+probs_11A10 = list()
+mix_names = unique(str_sub(basename(files), start = 1, end = 7))
+
+for(i in 1:length(mix_names)){
+  files_i = files[which(str_detect(files, mix_names[i]))]
+  for(j in 1:length(files_i)){
+    # Load SimSummary
+    load(files_i[j])
+    if(j == 1){
+      p_mat = SimSummary[[1]]$p_mat
+    }else{
+      p_mat = rbind(p_mat, SimSummary[[1]]$p_mat)
+    }
+    
+  }
+  
+  probs_11A10[[i]] = p_mat 
+  
+}
+
+names(probs_11A10) = mix_names
+
+
+
+```
+
+
+### Scatterplots
+
+
+```{r}
+# Truth as initial points
+df_Sim11A = p_dfA(pList = probs11A, mix_labels = mix_names, clust_names = clusts_11A_best,
+                 p_combos = p_combos, out_remove = F)
+df_Sim11A$InitialPts = "Truth"
+
+# 10 generic initial points used
+df_Sim11A10pts = p_dfA(pList = probs_11A10, mix_labels = mix_names, clust_names = clusts_11A_best,
+                 p_combos = p_combos, out_remove = F)
+df_Sim11A10pts$InitialPts = "10 Init Pts"
+
+df_InitPts = rbind(df_Sim11A10pts, df_Sim11A)
+df_InitPts$InitialPts = factor(df_InitPts$InitialPts, levels = c("Truth","10 Init Pts"))
+
+ggplot(data = df_InitPts) + 
+  geom_point(mapping = aes(x = True_p, y = p_est), shape = 1) + 
+  facet_grid(InitialPts ~ CellType) + geom_abline(slope = 1, intercept = 0) +
+  xlab("True Proportion") + ylab("Proportion Estimate") +
+  coord_fixed(ratio = 1, xlim = c(0,1), ylim = c(0,1)) +
+  theme_grey(base_size = 18) +
+  theme(axis.text.x = element_text(angle = 270))
+ggsave(filename = "Graphics11/Scatter_InitPts_Stacked.eps",
+       width = 7, height = 5, units = "in")
+
+```
+
+
+### Correlations and SSE
+
+Correlations and SSE (tables)
+
+```{r}
+x_initPts = corr_SSE(df_list = list(df_Sim11A, df_Sim11A10pts),
+                     col_labels = c("Truth","10 Initial Pts"), CT = CT)
+
+kable(x_initPts$corr, digits = 3, caption = "Cell Type Correlation Comparison")
+kable(x_initPts$SSE, digits = 3, caption = "Cell Type SSE Comparison")
+
+```
+
+Bar plots:
+
+```{r}
+df_corr_InitPts = bar_df(table = x_initPts$corr, col_labels = c("Truth","10 Generic"), 
+                        var_name = "InitPts", value_name = "Correlation")
+df_SSE_InitPts = bar_df(table = x_initPts$SSE, col_labels = c("Truth","10 Generic"), 
+                       var_name = "InitPts", value_name = "SSE")
+
+ggplot(data = df_corr_InitPts, aes(x = CellType, y = Correlation, fill = InitPts)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual(values = c("darkred","salmon")) +
+  coord_cartesian(ylim = c(0,1)) +
+  theme_grey(base_size = 18) +
+  theme(legend.position = "bottom") + labs(fill = "Initial Pts")
+ggsave(filename = "Graphics11/Corr_InitPts.eps",
+       width = 6, height = 4, units = "in")
+
+ggplot(data = df_SSE_InitPts, aes(x = CellType, y = SSE, fill = InitPts)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual(values = c("darkred","salmon")) +
+  theme_grey(base_size = 18) +
+  theme(legend.position = "bottom") + labs(fill = "Initial Pts")
+ggsave(filename = "Graphics11/SSE_InitPts.eps",
+       width = 6, height = 4, units = "in")
+
+ # c("darkred","red","salmon")
+```
+
+
+# Comparison of IsoDeconvMM vs CIBERSORTx (Different Number of Clusters - 'Best' Selection with no additional filtering)
+
+```{r}
+
+# Best cluster selection, no additional filtering
+
+best_results_new = list()
+for(i in 1:3){
+  mat = best_results_orig[[i]]
+  mat2 = mat[which(mat[,"clustID"] %in% names(alpha_keep11A)),]
+  best_results_new[[i]] = mat2
+}
+
+set.seed(2020)
+
+num = 47
+CT1_best = unique(best_results_new[[1]][1:num,"clustID"])
+CT2_best = unique(best_results_new[[2]][1:num,"clustID"])
+CT3_best = unique(best_results_new[[3]][1:num,"clustID"])
+
+clust_fc = union(CT1_best, union(CT2_best, CT3_best))
+# length(clust_fc)
+
+clusts_11A_best = clust_fc
+
+num = 21
+CT1_best = unique(best_results_new[[1]][1:num,"clustID"])
+CT2_best = unique(best_results_new[[2]][1:num,"clustID"])
+CT3_best = unique(best_results_new[[3]][1:num,"clustID"])
+
+clust_fc = union(CT1_best, union(CT2_best, CT3_best))
+# length(clust_fc)
+
+clust_names_50_best = sample(clust_fc, 50, replace = F)
+
+num = 10
+CT1_best = unique(best_results_new[[1]][1:num,"clustID"])
+CT2_best = unique(best_results_new[[2]][1:num,"clustID"])
+CT3_best = unique(best_results_new[[3]][1:num,"clustID"])
+
+clust_fc = union(CT1_best, union(CT2_best, CT3_best))
+# length(clust_fc)
+
+clust_names_25_best = sample(clust_fc, 25, replace = F)
+
+num = 4
+CT1_best = unique(best_results_new[[1]][1:num,"clustID"])
+CT2_best = unique(best_results_new[[2]][1:num,"clustID"])
+CT3_best = unique(best_results_new[[3]][1:num,"clustID"])
+
+clust_fc = union(CT1_best, union(CT2_best, CT3_best))
+# length(clust_fc)
+
+clust_names_10_best = sample(clust_fc, 10, replace = F)
+
+```
+
+** Using results from 10 initial points**
+
+```{r}
+
+df_Blue100 = p_dfA(pList = probs_11A10, mix_labels = mix_names, clust_names = clusts_11A_best,
+                 p_combos = p_combos, out_remove = F)
+df_Blue100$ClustNum = "100 Clusters"
+df_Blue100$GeneNum = "100 Genes"
+
+df_Blue50 = p_dfA(pList = probs_11A10, mix_labels = mix_names, clust_names = clust_names_50_best,
+                     p_combos = p_combos, out_remove = F)
+df_Blue50$ClustNum = "50 Clusters"
+df_Blue50$GeneNum = "50 Genes"
+
+df_Blue25 = p_dfA(pList = probs_11A10, mix_labels = mix_names, clust_names = clust_names_25_best,
+                     p_combos = p_combos, out_remove = F)
+df_Blue25$ClustNum = "25 Clusters"
+df_Blue25$GeneNum = "25 Genes"
+
+df_Blue10 = p_dfA(pList = probs_11A10, mix_labels = mix_names, clust_names = clust_names_10_best,
+                     p_combos = p_combos, out_remove = F)
+df_Blue10$ClustNum = "10 Clusters"
+df_Blue10$GeneNum = "10 Genes"
+
+df_ClustNo = rbind(df_Blue100, df_Blue50, df_Blue25, df_Blue10)
+
+df_ClustNo$ClustNum = factor(df_ClustNo$ClustNum, 
+                             levels = c("10 Clusters","25 Clusters","50 Clusters","100 Clusters"))
+df_ClustNo$GeneNum = factor(df_ClustNo$GeneNum, 
+                             levels = c("10 Genes","25 Genes","50 Genes","100 Genes"))
+
+ggplot(data = df_ClustNo) + 
+  geom_point(mapping = aes(x = True_p, y = p_est), shape = 1) + 
+  facet_grid(ClustNum ~ CellType) + geom_abline(slope = 1, intercept = 0) +
+  xlab("True Proportion") + ylab("Proportion Estimate") +
+  coord_fixed(ratio = 1, xlim = c(0,1), ylim = c(0,1)) +
+  ggtitle("IsoDeconvMM Method Results") +
+  theme_grey(base_size = 18) +
+  theme(axis.text.x = element_text(angle = 270))
+ggsave(filename = "Graphics11/Scatter_ClustNum_Stacked_10initPts.eps",
+       width = 7, height = 8, units = "in")
+
+ggplot(data = df_ClustNo) + 
+  geom_point(mapping = aes(x = True_p, y = p_est), shape = 1) + 
+  facet_grid(GeneNum ~ CellType) + geom_abline(slope = 1, intercept = 0) +
+  xlab("True Proportion") + ylab("Proportion Estimate") +
+  coord_fixed(ratio = 1, xlim = c(0,1), ylim = c(0,1)) +
+  ggtitle("IsoDeconvMM Method Results") +
+  theme_grey(base_size = 18) +
+  theme(axis.text.x = element_text(angle = 270))
+ggsave(filename = "Graphics11/Scatter_GeneNum_Stacked_10initPts.eps",
+       width = 7, height = 8, units = "in")
+
+```
+
+### Scatterplots
+
+(See scatterplots in "CIBERSORTx Results Graphics.Rmd")
+
+### Correlations and SSE
+
+**Using results from 10 initial points**
+
+Comparison: 100 vs 50 vs 25 clusters used in analysis
+
+
+```{r}
+# Results using 100 clusters
+probs_100 = read.table("CIBERSORTx_OddCTComp_UpregFC/CIBERSORTx_MixResults_100.txt", header = T)
+
+df_100 = p_dfC(p_results = probs_100, CT_cols = 2:4, p_combos = p_combos)
+df_100$ClustNum = "100 Clusters"
+df_100$GeneNum = "100 Genes"
+
+# Results using 50 clusters in signature matrix, 100 clusters in mixture matrix
+probs_50 = read.table("CIBERSORTx_OddCTComp_UpregFC/CIBERSORTx_MixResults_50.txt", header = T)
+
+df_50 = p_dfC(p_results = probs_50, CT_cols = 2:4, p_combos = p_combos)
+df_50$ClustNum = "50 Clusters"
+df_50$GeneNum = "50 Genes"
+
+# Results using 25 clusters in signature matrix, 100 clusters in mixture matrix
+probs_25 = read.table("CIBERSORTx_OddCTComp_UpregFC/CIBERSORTx_MixResults_25.txt", header = T)
+df_25 = p_dfC(p_results = probs_25, CT_cols = 2:4, p_combos = p_combos)
+df_25$ClustNum = "25 Clusters"
+df_25$GeneNum = "25 Genes"
+
+# Results using 10 clusters in signature matrix, 100 clusters in mixture matrix
+probs_10 = read.table("CIBERSORTx_OddCTComp_UpregFC/CIBERSORTx_MixResults_10.txt", header = T)
+df_10 = p_dfC(p_results = probs_10, CT_cols = 2:4, p_combos = p_combos)
+df_10$ClustNum = "10 Clusters"
+df_10$GeneNum = "10 Genes"
+
+df_cx_all = rbind(df_100, df_50, df_25, df_10)
+
+df_cx_all$ClustNum = factor(df_cx_all$ClustNum, 
+                            levels = c("10 Clusters","25 Clusters","50 Clusters","100 Clusters"))
+df_cx_all$GeneNum = factor(df_cx_all$GeneNum, 
+                            levels = c("10 Genes","25 Genes","50 Genes","100 Genes"))
+
+```
+
+```{r}
+ggplot(data = df_cx_all) + geom_point(mapping = aes(x = True_p, y = p_est), shape = 1) +
+  facet_grid(ClustNum ~ CellType) + geom_abline(slope = 1, intercept = 0) +
+  xlab("True Proportion") + ylab("Proportion Estimate") +
+  coord_fixed(ratio = 1, xlim = c(0, 1), ylim = c(0,1)) +
+  ggtitle("CIBERSORTx Method Results") +
+  theme_grey(base_size = 18) +
+  theme(axis.text.x = element_text(angle = 270))
+ggsave(filename = "Graphics11/CIBERSORTx_Scatter_ClustNum_Stacked.eps",
+       width = 7, height = 8, units = "in")
+
+ggplot(data = df_cx_all) + geom_point(mapping = aes(x = True_p, y = p_est), shape = 1) +
+  facet_grid(GeneNum ~ CellType) + geom_abline(slope = 1, intercept = 0) +
+  xlab("True Proportion") + ylab("Proportion Estimate") +
+  coord_fixed(ratio = 1, xlim = c(0, 1), ylim = c(0,1)) +
+  ggtitle("CIBERSORTx Method Results") +
+  theme_grey(base_size = 18) +
+  theme(axis.text.x = element_text(angle = 270))
+ggsave(filename = "Graphics11/CIBERSORTx_Scatter_GeneNum_Stacked.eps",
+       width = 7, height = 8, units = "in")
+```
+
+
+Statistics comparing accuracy as number of clusters differs (100 vs 50 vs 25 clusters)
+
+Tables:
+
+```{r}
+CT = c("CT1","CT2","CT3")
+
+x_ciber = corr_SSE(df_list = list(df_100, df_50, df_25, df_10), 
+                   col_labels = c("100 Clusters","50 Clusters","25 Clusters","10 Clusters"), 
+                   CT = CT)
+
+kable(x_ciber$corr, digits = 3, 
+      caption = "Correlation Comparisons for Different Numbers of Clusters")
+
+kable(x_ciber$SSE, digits = 3, 
+      caption = "SSE Comparisons for Different Numbers of Clusters")
+
+
+```
+
+
+Correlations and SSE (tables)
+
+```{r}
+CT = c("CT1","CT2","CT3")
+
+x_BlueClusts = corr_SSE(df_list = list(df_Blue100, df_Blue50, df_Blue25, df_Blue10),
+                        col_labels = c("100 Clusters","50 Clusters","25 Clusters","10 Clusters"), 
+                        CT = CT)
+
+kable(x_BlueClusts$corr, digits = 3, caption = "Cell Type Correlation Comparison")
+kable(x_BlueClusts$SSE, digits = 3, caption = "Cell Type SSE Comparison")
+
+df_corr_ClustNo = bar_df(table = x_BlueClusts$corr, 
+                         col_labels = c("100 Clusters","50 Clusters", "25 Clusters","10 Clusters"), 
+                        var_name = "Clusters", value_name = "Correlation")
+df_corr_ClustNo$FitType = "IsoDeconvMM"
+
+df_SSE_ClustNo = bar_df(table = x_BlueClusts$SSE, 
+                        col_labels = c("100 Clusters","50 Clusters", "25 Clusters","10 Clusters"), 
+                       var_name = "Clusters", value_name = "SSE")
+df_SSE_ClustNo$FitType = "IsoDeconvMM"
+
+```
+
+
+
+```{r}
+library(plyr)
+# Cibersort results
+df_corr_ClustNo_ciber = bar_df(table = x_ciber$corr, 
+                               col_labels = c("100 Clusters","50 Clusters", "25 Clusters",
+                                              "10 Clusters"), 
+                               var_name = "Clusters", value_name = "Correlation")
+df_corr_ClustNo_ciber$FitType = "CIBERSORTx"
+
+df_SSE_ClustNo_ciber = bar_df(table = x_ciber$SSE, 
+                              col_labels = c("100 Clusters","50 Clusters", "25 Clusters",
+                                             "10 Clusters"), 
+                              var_name = "Clusters", value_name = "SSE")
+df_SSE_ClustNo_ciber$FitType = "CIBERSORTx"
+
+
+df_corr_ClustComp = rbind(df_corr_ClustNo_ciber, df_corr_ClustNo)
+df_SSE_ClustComp = rbind(df_SSE_ClustNo_ciber, df_SSE_ClustNo)
+
+ggplot(data = df_corr_ClustComp, aes(x = CellType, y = Correlation, fill = FitType)) +
+  facet_grid(. ~ Clusters) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual(values = c("black","gray50")) +
+  coord_cartesian(ylim = c(0,1)) +
+  theme_grey(base_size = 18) +
+  theme(legend.position = "bottom") + labs(fill = "Method")
+ggsave(filename = "Graphics11/Corr_MethodCompare_10InitPts.eps",
+       width = 7, height = 4, units = "in")
+
+ggplot(data = df_SSE_ClustComp, aes(x = CellType, y = SSE, fill = FitType)) +
+  facet_grid(. ~ Clusters) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual(values = c("black","gray50")) +
+  theme_grey(base_size = 18) +
+  theme(legend.position = "bottom") + labs(fill = "Method")
+ggsave(filename = "Graphics11/SSE_MethodCompare_10InitPts.eps",
+       width = 7, height = 4, units = "in")
+```
+
+The End
